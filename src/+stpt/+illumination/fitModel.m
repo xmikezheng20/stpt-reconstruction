@@ -11,6 +11,9 @@ switch method
         [model, audit] = ...
             stpt.illumination.stitchitReference.fit( ...
             datasetIndex, cfg, stageDir);
+    case "tissueotsu"
+        [model, audit] = stpt.illumination.tissueOtsu.fit( ...
+            datasetIndex, cfg, stageDir);
     otherwise
         error("stpt:IlluminationMethod", ...
             "Unknown illumination method: %s", cfg.illumination.method);
@@ -29,10 +32,9 @@ for field = required
             "Missing cfg.illumination.%s.", field);
     end
 end
-if ~strcmpi(cfg.illumination.method, "stitchitReference") || ...
-        ~strcmpi(cfg.illumination.rowMode, "split")
+if ~strcmpi(cfg.illumination.rowMode, "split")
     error("stpt:IlluminationConfig", ...
-        "The current implementation supports split stitchitReference fitting.");
+        "The current implementation supports split odd/even fitting.");
 end
 if any(~ismember(cfg.illumination.trainingSections, ...
         [datasetIndex.sections.number]))
@@ -45,17 +47,38 @@ if ~ismember(cfg.illumination.tissueReferenceChannel, ...
         "The tissue-reference channel must be present in the dataset index.");
 end
 
-referenceFields = ["bottomFraction", "bottomStdLimit", ...
-    "prefixStdLimit", "thresholdScale", "maxRejectedFraction", ...
-    "minimumTilesPerParity", "acrossSectionTrimPercent"];
-if ~isfield(cfg.illumination, "stitchitReference")
-    error("stpt:IlluminationConfig", ...
-        "Missing cfg.illumination.stitchitReference.");
-end
-for field = referenceFields
-    if ~isfield(cfg.illumination.stitchitReference, field)
+method = lower(string(cfg.illumination.method));
+switch method
+    case "stitchitreference"
+        referenceFields = ["bottomFraction", "bottomStdLimit", ...
+            "prefixStdLimit", "thresholdScale", "maxRejectedFraction", ...
+            "minimumTilesPerParity", "acrossSectionTrimPercent"];
+        requireMethodFields(cfg.illumination, "stitchitReference", ...
+            referenceFields);
+    case "tissueotsu"
+        requireMethodFields(cfg.illumination, "tissueOtsu", ...
+            "templateTrimPercent");
+        trimPercent = cfg.illumination.tissueOtsu.templateTrimPercent;
+        if ~isscalar(trimPercent) || trimPercent < 0 || trimPercent >= 100
+            error("stpt:IlluminationConfig", ...
+                "Template trim percent must be in [0, 100).");
+        end
+    otherwise
         error("stpt:IlluminationConfig", ...
-            "Missing cfg.illumination.stitchitReference.%s.", field);
+            "Unknown illumination method: %s", cfg.illumination.method);
+end
+end
+
+function requireMethodFields(illuminationConfig, methodName, fields)
+% Require only the parameter block consumed by the selected algorithm.
+if ~isfield(illuminationConfig, methodName)
+    error("stpt:IlluminationConfig", ...
+        "Missing cfg.illumination.%s.", methodName);
+end
+for field = fields
+    if ~isfield(illuminationConfig.(methodName), field)
+        error("stpt:IlluminationConfig", ...
+            "Missing cfg.illumination.%s.%s.", methodName, field);
     end
 end
 end

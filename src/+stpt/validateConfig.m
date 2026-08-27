@@ -1,10 +1,10 @@
 function cfg = validateConfig(cfg)
 %VALIDATECONFIG Check the small set of assumptions used by the core pipeline.
 
-% Require only groups used by the master runner and Stage 1. Later modules
-% validate their own method-specific configuration at their public interface.
+% Require the groups used before a stage-specific algorithm is dispatched.
+% Method-specific illumination fields are checked at that module's interface.
 requiredTopLevel = ["experiment", "paths", "channels", "acquisition", ...
-    "stitching", "preprocessing", "qc", "execution"];
+    "stitching", "preprocessing", "sampling", "execution"];
 for field = requiredTopLevel
     if ~isfield(cfg, field)
         error("stpt:MissingConfig", "Missing cfg.%s.", field);
@@ -38,10 +38,49 @@ if ~isequal(size(cfg.acquisition.pixelSizeUm), [1, 2]) || ...
 end
 
 if ~isequal(size(cfg.preprocessing.cropPixels), [1, 4]) || ...
-        any(cfg.preprocessing.cropPixels < 0)
+        any(~isfinite(cfg.preprocessing.cropPixels)) || ...
+        any(cfg.preprocessing.cropPixels < 0) || ...
+        any(mod(cfg.preprocessing.cropPixels, 1) ~= 0)
     error("stpt:Crop", ...
-        "cfg.preprocessing.cropPixels must be [left right top bottom].");
+        "cfg.preprocessing.cropPixels must contain nonnegative integer " + ...
+        "[left right top bottom] values.");
 end
+if numel(unique(cfg.preprocessing.cropPixels)) ~= 1
+    error("stpt:Crop", ...
+        "This pipeline currently requires the same crop on all four sides.");
+end
+
+% Cropping may shrink support, but it must leave positive XY overlap at the
+% configured target step so later fusion has no gaps between nominal tiles.
+retainedSize = cfg.acquisition.tileSizePixels - [ ...
+    cfg.preprocessing.cropPixels(1) + cfg.preprocessing.cropPixels(2), ...
+    cfg.preprocessing.cropPixels(3) + cfg.preprocessing.cropPixels(4)];
+targetStepPixels = cfg.stitching.targetStepUm ./ ...
+    cfg.acquisition.pixelSizeUm;
+if any(retainedSize <= 0)
+    error("stpt:Crop", "Cropping removes the complete tile support.");
+end
+if any(retainedSize <= targetStepPixels)
+    error("stpt:CropOverlap", ...
+        "Cropping must leave positive overlap at the configured target step.");
+end
+
+% Resolve the user-facing interval once. Both Stage 1 QC and illumination
+% fitting consume this exact list, which is retained in resolved_config.mat.
+firstSection = cfg.sampling.firstSection;
+everyNSections = cfg.sampling.everyNSections;
+if ~isscalar(firstSection) || ~isfinite(firstSection) || ...
+        firstSection < 1 || mod(firstSection, 1) ~= 0 || ...
+        ~isscalar(everyNSections) || ~isfinite(everyNSections) || ...
+        everyNSections < 1 || mod(everyNSections, 1) ~= 0 || ...
+        firstSection > cfg.acquisition.sectionCount
+    error("stpt:SectionSampling", ...
+        "Section sampling requires an in-range integer firstSection and " + ...
+        "a positive integer everyNSections.");
+end
+cfg.sampling.sections = firstSection:everyNSections: ...
+    cfg.acquisition.sectionCount;
+cfg.qc.representativeSections = cfg.sampling.sections;
 
 % Keep the initial implementation deliberately narrow and auditable.
 if ~strcmpi(cfg.stitching.positionSource, "target")
@@ -49,15 +88,18 @@ if ~strcmpi(cfg.stitching.positionSource, "target")
         "The initial implementation supports target positions only.");
 end
 
-validStops = ["index", "illuminationPilot"];
+validStops = ["index", "illuminationSelection", "illuminationModel"];
 if ~any(strcmpi(cfg.execution.stopAfter, validStops))
     error("stpt:StopAfter", "cfg.execution.stopAfter must be %s.", ...
         strjoin(validStops, " or "));
 end
-if strcmpi(cfg.execution.stopAfter, "illuminationPilot") && ...
+if ~strcmpi(cfg.execution.stopAfter, "index") && ...
         ~isfield(cfg, "illumination")
     error("stpt:MissingConfig", ...
         "Stage 2 requires cfg.illumination.");
+end
+if isfield(cfg, "illumination")
+    cfg.illumination.trainingSections = cfg.sampling.sections;
 end
 
 % Normalize filesystem values once so downstream code uses one path type.

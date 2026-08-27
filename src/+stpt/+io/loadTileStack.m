@@ -16,10 +16,8 @@ tileSize = datasetIndex.geometry.tileSizePixels; % [width, height]
 
 % Load the first tile to establish the native MATLAB class, then preallocate one
 % contiguous stack. Only one channel/layer stack is resident at a time.
-firstPath = stpt.io.resolveTileFile( ...
+[firstImage, firstPath] = stpt.io.loadTile( ...
     datasetIndex, sectionNumber, layer, 1, channelId);
-firstImage = imread(firstPath);
-validateTile(firstImage, tileSize, firstPath);
 imageStack = zeros(tileSize(2), tileSize(1), nTiles, "like", firstImage);
 
 filePaths = strings(nTiles, 1);
@@ -27,13 +25,12 @@ tileMeans = zeros(nTiles, 1);
 tileStdDevs = zeros(nTiles, 1);
 
 for tile = 1:nTiles
-    filePath = stpt.io.resolveTileFile(datasetIndex, sectionNumber, layer, ...
-        tile, channelId);
     if tile == 1
         image = firstImage;
+        filePath = firstPath;
     else
-        image = imread(filePath);
-        validateTile(image, tileSize, filePath);
+        [image, filePath] = stpt.io.loadTile(datasetIndex, sectionNumber, ...
+            layer, tile, channelId);
     end
 
     imageStack(:, :, tile) = image;
@@ -57,18 +54,4 @@ tileStatistics = table( ...
     'VariableNames', {'sectionNumber', 'channelId', 'layer', ...
     'acquisitionIndex', 'nativeIndex', 'gridX', 'gridY', 'targetXUm', ...
     'targetYUm', 'tileMean', 'tileStdDev', 'filePath'});
-end
-
-function validateTile(image, expectedSize, filePath)
-% Fail immediately if a native TIFF does not match the indexed geometry.
-if ~ismatrix(image) || size(image, 2) ~= expectedSize(1) || ...
-        size(image, 1) ~= expectedSize(2)
-    error("stpt:TileDimensions", ...
-        "Tile %s does not match configured size %d-by-%d.", ...
-        filePath, expectedSize(1), expectedSize(2));
-end
-if ~isa(image, "uint16")
-    error("stpt:TileClass", "Expected uint16 TIFF data, found %s in %s.", ...
-        class(image), filePath);
-end
 end

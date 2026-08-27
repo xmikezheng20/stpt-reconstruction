@@ -27,6 +27,14 @@ Stage 2 is a reference baseline, not an accepted final calibration. Its compact 
 shows the sorted tile means, their spatial distribution, representative raw tiles,
 and the agreement between odd/even template fields.
 
+The alternative `tissueOtsu` method has two explicit checkpoints. Checkpoint 1
+pools cropped green-tile means across the configured training sections, applies
+one binary Otsu threshold to `log(1 + mean)`, and records the resulting physical
+tile mask. Checkpoint 2 reuses that exact mask and directly pools selected tiles
+across sections to fit odd/even illumination templates for each channel and layer.
+It uses a 10% pixelwise trimmed mean, zero additive offset, and the same
+median-normalized gain construction as the reference method.
+
 Illumination fitting is method-specific, but every method returns the same cropped
 offset-and-gain model. `fitModel` dispatches fitting, `validateModel` enforces the
 model contract, and `applyModel` applies the clear pointwise calculation
@@ -44,10 +52,17 @@ runStptReconstruction(config_260812_MikeZ_PO431109_F_01());
 The master runner will eventually orchestrate all reconstruction stages from the
 same experiment config.
 
+Representative sections are configured by a start and interval rather than a
+copied list. With `firstSection = 1` and `everyNSections = 50`, both Stage 1 QC
+and illumination fitting use sections `1, 51, 101, 151, 201, 251`; the final
+section is not appended automatically.
+
 Completed stage directories are protected from accidental replacement. To
 intentionally replace the requested terminal stage, set
 `cfg.execution.overwrite = true`; its old derived directory is removed before the
 new run starts. Completed prerequisite stages are loaded without modification.
+When the tissue-Otsu model is requested and its selection checkpoint is absent,
+the master runner creates that prerequisite before fitting the model.
 
 To stop after Stage 1:
 
@@ -57,16 +72,22 @@ cfg.execution.stopAfter = "index";
 runStptReconstruction(cfg);
 ```
 
+The experiment config currently stops after Checkpoint 2. Tissue selection is
+stored under `02_illumination/tissue_otsu/01_selection`; the fitted model is
+stored separately under `02_illumination/tissue_otsu/02_model`. Neither checkpoint
+writes corrected TIFFs.
+
 ## Code organization
 
 The package is divided by responsibility:
 
 | Package | Responsibility |
 | --- | --- |
-| `stpt.io` | Parse native Mosaic files, resolve indexed TIFF paths, and load tile stacks. |
+| `stpt.io` | Parse native Mosaic files, resolve indexed TIFF paths, and load individual tiles or tile stacks. |
 | `stpt.index` | Build the read-only dataset index and write Stage 1 QC. |
 | `stpt.illumination` | Define the shared fit, validation, and correction-model interface. |
 | `stpt.illumination.stitchitReference` | Implement only the StitchIt-reference estimation algorithm and its QC. |
+| `stpt.illumination.tissueOtsu` | Select tissue-bearing tiles with green-channel log-Otsu and fit direct pooled templates. |
 
 The master runner owns stage order and derived-output directories; scientific
 algorithms do not rename or reorganize raw files.
@@ -88,11 +109,20 @@ StitchIt source reference: `383b9fbd5f0664bf232c897a87759d8da43b725c`
 | `stitchitReference.collateSectionAverages` | `stitching/collateAverageImages.m` | Close port of the 10% across-section trimmed means for odd/even rows. |
 | `stitchitReference.fit` | `+stitchit/+tileload/illuminationCorrector.m`, `+stitchit/+tools/divideByImage.m` | Preserves median-normalized gain on retained pixels and emits the shared cropped model; reference offset remains zero. |
 | `stitchitReference.writeQC` | None | Independent method-specific diagnostic plots and tables. |
+| `tissueOtsu.classifyTiles` | None | Independent method: one global binary Otsu threshold on cropped green-tile log means. |
+| `tissueOtsu.writeQC` | None | Independent selection tables, histogram, and spatial tile maps. |
+| `tissueOtsu.estimateTemplate` | None | Independent direct 10% trimmed mean across selected tiles; no within-section averages. |
+| `tissueOtsu.fit` | None | Reuses the completed selection and assembles all channel/layer/parity templates. |
 
 Shared interface functions contain no StitchIt estimation logic:
 
 | Function | Contract |
 | --- | --- |
 | `stpt.illumination.fitModel` | Dispatch the configured method and return `model` plus `audit`. |
+| `stpt.illumination.buildModelFromTemplates` | Apply the shared crop, zero offset, median normalization, and gain construction. |
 | `stpt.illumination.validateModel` | Require complete channel/layer coverage and finite positive cropped gains. |
 | `stpt.illumination.applyModel` | Crop, subtract the selected offset, and multiply by the selected odd/even gain; return `single` without hidden clipping or casting. |
+
+Odd/even fields refer to the parity of the reconstructed target-grid row. In
+this dataset that parity exactly separates the two alternating directions of the
+serpentine acquisition; the names of the two groups are otherwise arbitrary.

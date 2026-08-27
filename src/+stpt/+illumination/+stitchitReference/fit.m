@@ -78,8 +78,8 @@ end
 
 tileStatistics = vertcat(statisticsParts{:});
 selectionSummary = struct2table(vertcat(summaryParts{:}));
-model = buildModel(templates, datasetIndex, cfg);
-templateSummary = makeTemplateSummary(model);
+model = stpt.illumination.buildModelFromTemplates(templates, datasetIndex, cfg);
+templateSummary = stpt.illumination.summarizeModel(model);
 
 writetable(tileStatistics, fullfile(stageDir, "tile_statistics.csv"));
 writetable(selectionSummary, fullfile(stageDir, "selection_summary.csv"));
@@ -104,95 +104,6 @@ audit.algorithmReference = struct( ...
 stpt.illumination.stitchitReference.writeQC( ...
     audit, datasetIndex, cfg, stageDir);
 writeStageSummary(audit, model, fullfile(stageDir, "stage_summary.txt"));
-end
-
-function model = buildModel(templates, datasetIndex, cfg)
-% Convert raw reference templates into the shared cropped correction model.
-model = struct();
-model.schemaVersion = 1;
-model.created = string(datetime("now"));
-model.method = string(cfg.illumination.method);
-model.rowMode = string(cfg.illumination.rowMode);
-model.trainingSections = cfg.illumination.trainingSections(:)';
-model.tissueReferenceChannel = cfg.illumination.tissueReferenceChannel;
-model.cropPixels = cfg.preprocessing.cropPixels;
-model.inputTileSizePixels = datasetIndex.geometry.tileSizePixels;
-model.outputTileSizePixels = datasetIndex.geometry.retainedTileSizePixels;
-
-nChannels = numel(datasetIndex.channels);
-nLayers = datasetIndex.geometry.layersPerSection;
-channels = repmat(struct("id", [], "name", "", "layers", struct([])), ...
-    nChannels, 1);
-for c = 1:nChannels
-    channels(c).id = datasetIndex.channels(c).id;
-    channels(c).name = datasetIndex.channels(c).name;
-    layers = repmat(emptyLayerModel(), nLayers, 1);
-    for layer = 1:nLayers
-        template = templates{c, layer};
-        [layers(layer).gain.oddRows, ...
-            layers(layer).normalization.oddRows] = templateGain( ...
-            template.oddRows, model.cropPixels);
-        [layers(layer).gain.evenRows, ...
-            layers(layer).normalization.evenRows] = templateGain( ...
-            template.evenRows, model.cropPixels);
-    end
-    channels(c).layers = layers;
-end
-model.channels = channels;
-end
-
-function layer = emptyLayerModel()
-% Reference correction has no additive offset; future methods may provide one.
-layer = struct();
-layer.offset = struct("oddRows", single(0), "evenRows", single(0));
-layer.gain = struct("oddRows", single([]), "evenRows", single([]));
-layer.normalization = struct("oddRows", single(nan), ...
-    "evenRows", single(nan));
-end
-
-function [gain, normalization] = templateGain(template, cropPixels)
-% Preserve StitchIt's gain on retained pixels without defining discarded edges.
-template = single(template);
-normalization = median(template(:));
-cropped = template( ...
-    cropPixels(3)+1:end-cropPixels(4), ...
-    cropPixels(1)+1:end-cropPixels(2));
-if ~isfinite(normalization) || normalization <= 0 || ...
-        any(~isfinite(cropped(:))) || any(cropped(:) <= 0)
-    error("stpt:IlluminationTemplate", ...
-        "The reference template is invalid within cropped support.");
-end
-gain = normalization ./ cropped;
-end
-
-function summaryTable = makeTemplateSummary(model)
-% Record the small set of values needed to audit correction magnitude.
-nChannels = numel(model.channels);
-nLayers = numel(model.channels(1).layers);
-rows = cell(nChannels * nLayers, 1);
-record = 0;
-
-for c = 1:nChannels
-    for layer = 1:nLayers
-        record = record + 1;
-        layerModel = model.channels(c).layers(layer);
-        oddGain = layerModel.gain.oddRows;
-        evenGain = layerModel.gain.evenRows;
-        row = struct();
-        row.channelId = model.channels(c).id;
-        row.layer = layer;
-        row.oddNormalization = layerModel.normalization.oddRows;
-        row.evenNormalization = layerModel.normalization.evenRows;
-        row.oddGainP01 = prctile(oddGain(:), 1);
-        row.oddGainMedian = median(oddGain(:));
-        row.oddGainP99 = prctile(oddGain(:), 99);
-        row.evenGainP01 = prctile(evenGain(:), 1);
-        row.evenGainMedian = median(evenGain(:));
-        row.evenGainP99 = prctile(evenGain(:), 99);
-        rows{record} = row;
-    end
-end
-summaryTable = struct2table(vertcat(rows{:}));
 end
 
 function writeStageSummary(audit, model, outputPath)

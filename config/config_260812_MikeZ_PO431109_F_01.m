@@ -42,12 +42,19 @@ cfg.stitching.targetStepUm = [700, 700];     % [x, y]
 % Cropping changes retained support, but does not define tile placement.
 cfg.preprocessing.cropPixels = [15, 15, 15, 15]; % [left right top bottom]
 
-% Shared illumination interface. Green is the default structural reference for
-% future tissue selection, but the StitchIt-reference method does not use it.
-cfg.illumination.method = "stitchitReference";
+% Use one regular section sample for geometry QC and illumination fitting.
+% The final section is not appended when it does not fall on this sequence.
+cfg.sampling.firstSection = 1;
+cfg.sampling.everyNSections = 50;
+
+% Shared illumination interface. The initial alternative method uses one global
+% log-Otsu threshold on cropped green tiles to select tissue-bearing locations.
+cfg.illumination.method = "tissueOtsu";
 cfg.illumination.rowMode = "split";
 cfg.illumination.tissueReferenceChannel = 2;
-cfg.illumination.trainingSections = [1, 51, 101, 151, 201, 251];
+
+% Direct pooled template estimator used after the tissue-selection checkpoint.
+cfg.illumination.tissueOtsu.templateTrimPercent = 10;
 
 % Parameters used only by the StitchIt-reference algorithm.
 cfg.illumination.stitchitReference.bottomFraction = 0.05;
@@ -59,10 +66,8 @@ cfg.illumination.stitchitReference.minimumTilesPerParity = 2;
 cfg.illumination.stitchitReference.acrossSectionTrimPercent = 10;
 cfg.fusion.mode = "overwrite";
 
-cfg.qc.representativeSections = [1, 51, 101, 151, 201, 251];
-
-% Development checkpoint: stop after the representative-section illumination
-% pilot. Completed Stage 1 output is loaded as a prerequisite, not regenerated.
-cfg.execution.stopAfter = "illuminationPilot";
+% Development checkpoint: fit the direct pooled illumination model from the
+% completed tissue-selection output, but do not yet write corrected TIFFs.
+cfg.execution.stopAfter = "illuminationModel";
 cfg.execution.overwrite = false;
 end
