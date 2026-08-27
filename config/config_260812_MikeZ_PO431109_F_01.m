@@ -13,12 +13,6 @@ cfg.paths.rawRoot = ...
 cfg.paths.outputRoot = fullfile(cfg.paths.rawRoot, "processed", ...
     "reconstruction");
 
-% Record the exact upstream implementation used as the algorithmic reference.
-% The master runner also records the currently checked-out commit at run time.
-cfg.references.stitchIt.root = "/home/xizheng/Projects/StitchIt";
-cfg.references.stitchIt.expectedCommit = ...
-    "383b9fbd5f0664bf232c897a87759d8da43b725c";
-
 % Explicit channel-to-root mapping. The absent blue channel (ch3) is not part
 % of the reconstruction, even though the acquisition metadata reports three
 % configured detector channels.
@@ -47,12 +41,28 @@ cfg.stitching.targetStepUm = [700, 700];     % [x, y]
 % explicit 15-pixel value must therefore be validated on this TissueCyte data.
 % Cropping changes retained support, but does not define tile placement.
 cfg.preprocessing.cropPixels = [15, 15, 15, 15]; % [left right top bottom]
-cfg.illumination.mode = "split";
+
+% Shared illumination interface. Green is the default structural reference for
+% future tissue selection, but the StitchIt-reference method does not use it.
+cfg.illumination.method = "stitchitReference";
+cfg.illumination.rowMode = "split";
+cfg.illumination.tissueReferenceChannel = 2;
+cfg.illumination.trainingSections = [1, 51, 101, 151, 201, 251];
+
+% Parameters used only by the StitchIt-reference algorithm.
+cfg.illumination.stitchitReference.bottomFraction = 0.05;
+cfg.illumination.stitchitReference.bottomStdLimit = 0.6;
+cfg.illumination.stitchitReference.prefixStdLimit = 0.085;
+cfg.illumination.stitchitReference.thresholdScale = 1.01;
+cfg.illumination.stitchitReference.maxRejectedFraction = 0.85;
+cfg.illumination.stitchitReference.minimumTilesPerParity = 2;
+cfg.illumination.stitchitReference.acrossSectionTrimPercent = 10;
 cfg.fusion.mode = "overwrite";
 
 cfg.qc.representativeSections = [1, 51, 101, 151, 201, 251];
 
-% Development checkpoint: the master runner intentionally stops after Stage 1.
-cfg.execution.stopAfter = "index";
+% Development checkpoint: stop after the representative-section illumination
+% pilot. Completed Stage 1 output is loaded as a prerequisite, not regenerated.
+cfg.execution.stopAfter = "illuminationPilot";
 cfg.execution.overwrite = false;
 end

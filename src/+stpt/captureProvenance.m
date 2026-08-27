@@ -1,31 +1,23 @@
-function provenance = captureProvenance(repoRoot, cfg)
+function provenance = captureProvenance(repoRoot)
 %CAPTUREPROVENANCE Record the exact code revisions used for a pipeline run.
 %
-% The reconstruction repository and the pinned StitchIt reference are recorded
-% separately. A dirty flag is essential because a commit hash alone does not
-% identify code containing uncommitted changes.
+% A dirty flag is essential because a commit hash alone does not identify code
+% containing uncommitted changes. External reference repositories are not runtime
+% dependencies; algorithm sources are documented in local function headers.
 
 % Record the execution environment alongside source-control state.
 provenance = struct();
 provenance.captured = string(datetime("now"));
 provenance.matlabVersion = string(version);
 provenance.repository = inspectGitRepository(repoRoot);
-
-% Capture both the expected StitchIt revision from config and the revision that
-% is actually present on disk. A mismatch is recorded rather than hidden.
-provenance.stitchIt = inspectGitRepository(cfg.references.stitchIt.root);
-provenance.stitchIt.expectedCommit = ...
-    string(cfg.references.stitchIt.expectedCommit);
-provenance.stitchIt.matchesExpectedCommit = ...
-    provenance.stitchIt.commit == provenance.stitchIt.expectedCommit;
 end
 
 function info = inspectGitRepository(repoPath)
 % Query Git without modifying the repository or its working tree.
 repoPath = string(repoPath);
 if ~isfolder(repoPath)
-    error("stpt:MissingReferenceRepository", ...
-        "Reference repository does not exist: %s", repoPath);
+    error("stpt:MissingRepository", ...
+        "Reconstruction repository does not exist: %s", repoPath);
 end
 
 info = struct();

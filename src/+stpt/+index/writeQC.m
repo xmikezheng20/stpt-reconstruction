@@ -1,5 +1,5 @@
-function writeIndexQC(datasetIndex, cfg, stageDir)
-%WRITEINDEXQC Write human-readable Stage 1 tables, summaries, and plots.
+function writeQC(datasetIndex, cfg, stageDir)
+%WRITEQC Write human-readable Stage 1 tables, summaries, and plots.
 
 % Write dataset-wide summaries first; these remain useful even without MATLAB.
 stageDir = string(stageDir);
@@ -8,7 +8,7 @@ writetable(datasetIndex.sectionInventory, ...
 writeMetadataSummary(datasetIndex, cfg, ...
     fullfile(stageDir, "metadata_summary.txt"));
 
-% Emit a complete tile audit and three geometry checks for selected sections.
+% Emit a complete tile audit and two geometry checks for selected sections.
 for sectionNumber = cfg.qc.representativeSections
     sectionPosition = find([datasetIndex.sections.number] == sectionNumber, 1);
     if isempty(sectionPosition)
@@ -23,8 +23,6 @@ for sectionNumber = cfg.qc.representativeSections
 
     plotTargetGrid(section.positions, sectionNumber, ...
         fullfile(stageDir, stem + "_target_grid.png"));
-    plotAcquisitionPath(section.positions, sectionNumber, ...
-        fullfile(stageDir, stem + "_acquisition_path.png"));
     plotTargetVsActual(section.positions, sectionNumber, ...
         fullfile(stageDir, stem + "_target_vs_actual.png"));
 end
@@ -53,7 +51,7 @@ for c = 1:numel(datasetIndex.channels)
     for layer = 1:nLayers
         paths = strings(height(auditTable), 1);
         for tile = 1:height(auditTable)
-            paths(tile) = stpt.resolveTileFile(datasetIndex, section.number, ...
+            paths(tile) = stpt.io.resolveTileFile(datasetIndex, section.number, ...
                 layer, tile, channelId);
         end
         auditTable.(sprintf("ch%dLayer%dFile", channelId, layer)) = paths;
@@ -107,10 +105,6 @@ fprintf(fid, "  Post-crop overlap: %.6g x %.6g pixels\n", ...
 fprintf(fid, "  Nominal stitched canvas: %.6g x %.6g pixels\n\n", ...
     geometry.nominalCanvasSizePixels);
 
-fprintf(fid, "Future-stage settings\n");
-fprintf(fid, "  XY illumination mode: %s\n", cfg.illumination.mode);
-fprintf(fid, "  Fusion mode: %s\n", cfg.fusion.mode);
-fprintf(fid, "  Position source: %s\n", cfg.stitching.positionSource);
 fclose(fid);
 end
 
@@ -156,31 +150,6 @@ set(gca, "YDir", "reverse");
 xlabel("Target x (um)");
 ylabel("Target y (um)");
 title(sprintf("Section %d: reconstructed target grid", sectionNumber));
-colorScale = colorbar;
-colorScale.Label.String = "Acquisition index";
-grid on
-exportgraphics(fig, outputPath, "Resolution", 150);
-close(fig);
-end
-
-function plotAcquisitionPath(positions, sectionNumber, outputPath)
-% Connect points in native order to reveal the serpentine scan traversal.
-fig = figure("Visible", "off", "Color", "w", ...
-    "Position", [100, 100, 800, 650]);
-plot(positions.targetXUm, positions.targetYUm, "-", ...
-    "Color", [0.3, 0.3, 0.3]);
-hold on
-scatter(positions.targetXUm, positions.targetYUm, 20, ...
-    positions.acquisitionIndex, "filled");
-scatter(positions.targetXUm(1), positions.targetYUm(1), 90, ...
-    [0.1, 0.6, 0.1], "filled", "DisplayName", "start");
-scatter(positions.targetXUm(end), positions.targetYUm(end), 90, ...
-    [0.8, 0.1, 0.1], "filled", "DisplayName", "end");
-axis equal tight
-set(gca, "YDir", "reverse");
-xlabel("Target x (um)");
-ylabel("Target y (um)");
-title(sprintf("Section %d: native acquisition path", sectionNumber));
 colorScale = colorbar;
 colorScale.Label.String = "Acquisition index";
 grid on

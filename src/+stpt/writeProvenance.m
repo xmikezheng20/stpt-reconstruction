@@ -7,7 +7,7 @@ if fid < 0
 end
 
 % Keep the text file compact while preserving every value needed to identify
-% the reconstruction code and its upstream algorithmic reference.
+% the local reconstruction code that produced the outputs.
 fprintf(fid, "STPT reconstruction provenance\n");
 fprintf(fid, "Captured: %s\n", provenance.captured);
 fprintf(fid, "MATLAB: %s\n\n", provenance.matlabVersion);
@@ -16,17 +16,7 @@ fprintf(fid, "stpt-reconstruction\n");
 fprintf(fid, "  root: %s\n", provenance.repository.root);
 fprintf(fid, "  branch: %s\n", provenance.repository.branch);
 fprintf(fid, "  commit: %s\n", provenance.repository.commit);
-fprintf(fid, "  dirty: %s\n\n", logicalText(provenance.repository.isDirty));
-
-fprintf(fid, "StitchIt reference\n");
-fprintf(fid, "  root: %s\n", provenance.stitchIt.root);
-fprintf(fid, "  branch: %s\n", provenance.stitchIt.branch);
-fprintf(fid, "  expected commit: %s\n", ...
-    provenance.stitchIt.expectedCommit);
-fprintf(fid, "  actual commit: %s\n", provenance.stitchIt.commit);
-fprintf(fid, "  matches expected: %s\n", ...
-    logicalText(provenance.stitchIt.matchesExpectedCommit));
-fprintf(fid, "  dirty: %s\n", logicalText(provenance.stitchIt.isDirty));
+fprintf(fid, "  dirty: %s\n", logicalText(provenance.repository.isDirty));
 fclose(fid);
 end
 

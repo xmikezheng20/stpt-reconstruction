@@ -1,5 +1,5 @@
-function datasetIndex = buildIndex(cfg)
-%BUILDINDEX Build a read-only map from acquisition coordinates to raw TIFFs.
+function datasetIndex = build(cfg)
+%BUILD Build a read-only map from acquisition coordinates to raw TIFFs.
 %
 % No image is copied, renamed, or modified. The resulting index records native
 % filenames and reconstructs the regular target grid from the movement records
@@ -48,7 +48,7 @@ if isempty(metadataChannelPosition)
 end
 
 masterPath = findSingleMosaic(channels(metadataChannelPosition).root);
-masterMosaic = stpt.readMosaicFile(masterPath);
+masterMosaic = stpt.io.readMosaicFile(masterPath);
 validateMasterMetadata(masterMosaic.parameters, cfg);
 
 % Preallocate the complete index and the compact per-section QC measurements.
@@ -85,7 +85,7 @@ for s = 1:cfg.acquisition.sectionCount
         channels(metadataChannelPosition).root, ...
         channelDirectories(metadataChannelPosition));
     sectionMosaicPath = findSingleMosaic(metadataSectionPath);
-    sectionMosaic = stpt.readMosaicFile(sectionMosaicPath);
+    sectionMosaic = stpt.io.readMosaicFile(sectionMosaicPath);
     positions = buildTargetGrid(sectionMosaic.positions, cfg);
     nativeStartIndex = sectionMosaic.parameters.startnum;
 

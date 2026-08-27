@@ -1,10 +1,10 @@
 function cfg = validateConfig(cfg)
 %VALIDATECONFIG Check the small set of assumptions used by the core pipeline.
 
-% First require the major config groups shared by all planned pipeline stages.
+% Require only groups used by the master runner and Stage 1. Later modules
+% validate their own method-specific configuration at their public interface.
 requiredTopLevel = ["experiment", "paths", "channels", "acquisition", ...
-    "stitching", "preprocessing", "illumination", "fusion", "qc", ...
-    "execution", "references"];
+    "stitching", "preprocessing", "qc", "execution"];
 for field = requiredTopLevel
     if ~isfield(cfg, field)
         error("stpt:MissingConfig", "Missing cfg.%s.", field);
@@ -47,6 +47,17 @@ end
 if ~strcmpi(cfg.stitching.positionSource, "target")
     error("stpt:PositionSource", ...
         "The initial implementation supports target positions only.");
+end
+
+validStops = ["index", "illuminationPilot"];
+if ~any(strcmpi(cfg.execution.stopAfter, validStops))
+    error("stpt:StopAfter", "cfg.execution.stopAfter must be %s.", ...
+        strjoin(validStops, " or "));
+end
+if strcmpi(cfg.execution.stopAfter, "illuminationPilot") && ...
+        ~isfield(cfg, "illumination")
+    error("stpt:MissingConfig", ...
+        "Stage 2 requires cfg.illumination.");
 end
 
 % Normalize filesystem values once so downstream code uses one path type.

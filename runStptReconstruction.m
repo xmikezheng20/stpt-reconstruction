@@ -1,9 +1,8 @@
 function result = runStptReconstruction(cfg)
-%RUNSTPTRECONSTRUCTION Run the configured STPT reconstruction stages.
+%RUNSTPTRECONSTRUCTION Run configured STPT reconstruction stages in order.
 %
-% RESULT = RUNSTPTRECONSTRUCTION(CFG) is the single pipeline entry point.
-% During initial development CFG.execution.stopAfter is "index", so only the
-% read-only indexing and geometry-QC stage runs.
+% Completed prerequisite stages are loaded rather than regenerated. The scalar
+% CFG.execution.overwrite applies only to the requested terminal stage.
 
 arguments
     cfg (1,1) struct
@@ -11,73 +10,99 @@ end
 
 repoRoot = fileparts(mfilename("fullpath"));
 addpath(fullfile(repoRoot, "src"));
-
 cfg = stpt.validateConfig(cfg);
-stageDir = fullfile(cfg.paths.outputRoot, "01_index");
-completionPath = fullfile(stageDir, "stage_complete.txt");
+targetStage = lower(string(cfg.execution.stopAfter));
 
-% A stage directory represents one coherent run. Refuse both completed and
-% partial directories by default. An explicit overwrite starts from an empty
-% derived-output directory, preventing stale artifacts or completion markers.
-if isfolder(stageDir)
-    if ~cfg.execution.overwrite
-        if isfile(completionPath)
-            state = "complete";
-        else
-            state = "incomplete";
-        end
-        error("stpt:ExistingStage", ...
-            "Stage 1 output is already %s. Set cfg.execution.overwrite=true " + ...
-            "to replace it: %s", state, stageDir);
-    end
-    rmdir(stageDir, "s");
+% Stage 1 is either the requested target or a prerequisite for Stage 2.
+indexDir = string(fullfile(cfg.paths.outputRoot, "01_index"));
+indexComplete = isfile(fullfile(indexDir, "stage_complete.txt"));
+if targetStage == "index" || ~indexComplete
+    datasetIndex = runIndexStage(cfg, repoRoot, ...
+        targetStage == "index" && cfg.execution.overwrite);
+else
+    fprintf("Loading completed Stage 1 index: %s\n", indexDir);
+    saved = load(fullfile(indexDir, "datasetIndex.mat"), "datasetIndex");
+    datasetIndex = saved.datasetIndex;
 end
-mkdir(stageDir);
 
-logPath = fullfile(stageDir, "stage.log");
-diary(logPath);
+result = struct("config", cfg, "index", datasetIndex, ...
+    "indexDirectory", indexDir);
+if targetStage == "index"
+    return
+end
+
+% Stage 2 fits one configured method through the shared illumination interface.
+[illuminationModel, illuminationAudit, illuminationDir] = ...
+    runIlluminationStage( ...
+    datasetIndex, cfg, repoRoot, cfg.execution.overwrite);
+result.illuminationModel = illuminationModel;
+result.illuminationAudit = illuminationAudit;
+result.illuminationDirectory = illuminationDir;
+end
+
+function datasetIndex = runIndexStage(cfg, repoRoot, overwrite)
+% Build Stage 1 in a fresh directory and mark it complete only at the end.
+stageDir = stpt.prepareStageDirectory(cfg.paths.outputRoot, "01_index", overwrite);
+diary(fullfile(stageDir, "stage.log"));
 diaryCleanup = onCleanup(@() diary("off"));
-
-% Capture the exact code state before producing any scientific artifacts.
-provenance = stpt.captureProvenance(repoRoot, cfg);
-
-fprintf("\nSTPT reconstruction\n");
-fprintf("Experiment: %s\n", cfg.experiment.id);
-fprintf("Started:    %s\n", string(datetime("now")));
-fprintf("MATLAB:     %s\n", version);
-fprintf("Raw root:   %s\n", cfg.paths.rawRoot);
-fprintf("Output:     %s\n\n", cfg.paths.outputRoot);
-fprintf("Code commit:     %s%s\n", provenance.repository.commit, ...
-    dirtySuffix(provenance.repository.isDirty));
-fprintf("StitchIt commit: %s%s\n\n", provenance.stitchIt.commit, ...
-    dirtySuffix(provenance.stitchIt.isDirty));
+provenance = stpt.captureProvenance(repoRoot);
+logRunHeader(cfg, provenance, "Stage 1/2: native-data index", stageDir);
 
 save(fullfile(stageDir, "resolved_config.mat"), "cfg", "provenance");
 stpt.writeProvenance(provenance, fullfile(stageDir, "provenance.txt"));
 
-fprintf("Stage 1/4: build and validate native-data index\n");
-datasetIndex = stpt.buildIndex(cfg);
+datasetIndex = stpt.index.build(cfg);
 datasetIndex.provenance = provenance;
-stpt.writeIndexQC(datasetIndex, cfg, stageDir);
+stpt.index.writeQC(datasetIndex, cfg, stageDir);
 save(fullfile(stageDir, "datasetIndex.mat"), "datasetIndex", "-v7.3");
-writelines("Stage 1 completed " + string(datetime("now")), completionPath);
+writelines("Stage 1 completed " + string(datetime("now")), ...
+    fullfile(stageDir, "stage_complete.txt"));
 
-fprintf("Stage 1 complete: %s\n", string(datetime("now")));
-fprintf("Indexed %d sections, %d layers, %d tiles/layer, and %d channels.\n", ...
-    numel(datasetIndex.sections), datasetIndex.geometry.layersPerSection, ...
+fprintf("Stage 1 complete: indexed %d sections, %d layers, " + ...
+    "%d tiles/layer, and %d channels.\n", numel(datasetIndex.sections), ...
+    datasetIndex.geometry.layersPerSection, ...
     datasetIndex.geometry.tilesPerLayer, numel(datasetIndex.channels));
-fprintf("QC outputs: %s\n\n", stageDir);
-
-result = struct("config", cfg, "index", datasetIndex, ...
-    "stageDirectory", string(stageDir));
-
-if strcmpi(cfg.execution.stopAfter, "index")
-    fprintf("Stopped after the configured Stage 1 checkpoint.\n");
-    return
+fprintf("Outputs: %s\n\n", stageDir);
 end
 
-error("stpt:NotImplemented", ...
-    "Stages after indexing have not been implemented yet.");
+function [model, audit, stageDir] = runIlluminationStage( ...
+        datasetIndex, cfg, repoRoot, overwrite)
+% Fit the configured illumination method and save its common outputs.
+stageDir = stpt.prepareStageDirectory(cfg.paths.outputRoot, ...
+    "02_illumination_pilot", overwrite);
+diary(fullfile(stageDir, "stage.log"));
+diaryCleanup = onCleanup(@() diary("off"));
+provenance = stpt.captureProvenance(repoRoot);
+logRunHeader(cfg, provenance, ...
+    "Stage 2/2: illumination-model fit", stageDir);
+
+save(fullfile(stageDir, "resolved_config.mat"), "cfg", "provenance");
+stpt.writeProvenance(provenance, fullfile(stageDir, "provenance.txt"));
+
+[model, audit] = stpt.illumination.fitModel(datasetIndex, cfg, stageDir);
+model.provenance = provenance;
+audit.provenance = provenance;
+save(fullfile(stageDir, "illuminationModel.mat"), "model", "-v7.3");
+save(fullfile(stageDir, "illuminationAudit.mat"), "audit", "-v7.3");
+writelines("Stage 2 completed " + string(datetime("now")), ...
+    fullfile(stageDir, "stage_complete.txt"));
+
+fprintf("Stage 2 complete: %s fitted from %d training sections.\n", ...
+    cfg.illumination.method, numel(cfg.illumination.trainingSections));
+fprintf("Outputs: %s\n\n", stageDir);
+end
+
+function logRunHeader(cfg, provenance, stageLabel, stageDir)
+% Print the same compact provenance header for every independently logged stage.
+fprintf("\nSTPT reconstruction\n");
+fprintf("Experiment:  %s\n", cfg.experiment.id);
+fprintf("Stage:       %s\n", stageLabel);
+fprintf("Started:     %s\n", string(datetime("now")));
+fprintf("MATLAB:      %s\n", version);
+fprintf("Raw root:    %s\n", cfg.paths.rawRoot);
+fprintf("Stage output:%s\n", stageDir);
+fprintf("Code commit: %s%s\n\n", provenance.repository.commit, ...
+    dirtySuffix(provenance.repository.isDirty));
 end
 
 function suffix = dirtySuffix(isDirty)
