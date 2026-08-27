@@ -1,0 +1,40 @@
+function writeProvenance(provenance, outputPath)
+%WRITEPROVENANCE Write a human-readable companion to saved provenance data.
+
+fid = fopen(outputPath, "w");
+if fid < 0
+    error("stpt:WriteOutput", "Could not write %s.", outputPath);
+end
+
+% Keep the text file compact while preserving every value needed to identify
+% the reconstruction code and its upstream algorithmic reference.
+fprintf(fid, "STPT reconstruction provenance\n");
+fprintf(fid, "Captured: %s\n", provenance.captured);
+fprintf(fid, "MATLAB: %s\n\n", provenance.matlabVersion);
+
+fprintf(fid, "stpt-reconstruction\n");
+fprintf(fid, "  root: %s\n", provenance.repository.root);
+fprintf(fid, "  branch: %s\n", provenance.repository.branch);
+fprintf(fid, "  commit: %s\n", provenance.repository.commit);
+fprintf(fid, "  dirty: %s\n\n", logicalText(provenance.repository.isDirty));
+
+fprintf(fid, "StitchIt reference\n");
+fprintf(fid, "  root: %s\n", provenance.stitchIt.root);
+fprintf(fid, "  branch: %s\n", provenance.stitchIt.branch);
+fprintf(fid, "  expected commit: %s\n", ...
+    provenance.stitchIt.expectedCommit);
+fprintf(fid, "  actual commit: %s\n", provenance.stitchIt.commit);
+fprintf(fid, "  matches expected: %s\n", ...
+    logicalText(provenance.stitchIt.matchesExpectedCommit));
+fprintf(fid, "  dirty: %s\n", logicalText(provenance.stitchIt.isDirty));
+fclose(fid);
+end
+
+function value = logicalText(tf)
+% Render booleans consistently for easy inspection and parsing.
+if tf
+    value = "true";
+else
+    value = "false";
+end
+end
