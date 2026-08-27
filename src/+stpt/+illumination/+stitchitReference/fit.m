@@ -90,6 +90,7 @@ audit.schemaVersion = 1;
 audit.created = string(datetime("now"));
 audit.method = string(cfg.illumination.method);
 audit.trainingSections = sections;
+audit.qcSections = cfg.illumination.qcSections(:)';
 audit.tileStatistics = tileStatistics;
 audit.selectionSummary = selectionSummary;
 audit.templateSummary = templateSummary;
@@ -117,6 +118,7 @@ end
 fprintf(fid, "Stage 2 illumination reference completed; inspect QC before acceptance\n");
 fprintf(fid, "Method: %s\n", model.method);
 fprintf(fid, "Training sections: %s\n", mat2str(model.trainingSections));
+fprintf(fid, "QC sections: %s\n", mat2str(audit.qcSections));
 fprintf(fid, "Configured tissue-reference channel: ch%d (unused by this method)\n", ...
     model.tissueReferenceChannel);
 fprintf(fid, "Tile records: %d\n", height(audit.tileStatistics));

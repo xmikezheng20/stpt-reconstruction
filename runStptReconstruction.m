@@ -111,7 +111,11 @@ datasetIndex = saved.datasetIndex;
 saved = load(configPath, "cfg");
 indexConfig = saved.cfg;
 if isfield(indexConfig, "sampling") && ...
+        isfield(indexConfig.sampling, "qcSections")
+    indexedQcSections = indexConfig.sampling.qcSections;
+elseif isfield(indexConfig, "sampling") && ...
         isfield(indexConfig.sampling, "sections")
+    % Accept output from the earlier single-interval configuration.
     indexedQcSections = indexConfig.sampling.sections;
 elseif isfield(indexConfig, "qc") && ...
         isfield(indexConfig.qc, "representativeSections")
@@ -121,7 +125,7 @@ else
     error("stpt:StaleIndex", ...
         "The completed index does not record its representative QC sections.");
 end
-if ~isequal(indexedQcSections(:)', cfg.sampling.sections(:)')
+if ~isequal(indexedQcSections(:)', cfg.sampling.qcSections(:)')
     error("stpt:StaleIndex", ...
         "Stage 1 QC was generated for different representative sections. " + ...
         "Rerun the index stage with cfg.execution.overwrite=true.");

@@ -63,6 +63,7 @@ audit.schemaVersion = 1;
 audit.created = string(datetime("now"));
 audit.method = string(cfg.illumination.method);
 audit.trainingSections = cfg.illumination.trainingSections(:)';
+audit.qcSections = cfg.illumination.qcSections(:)';
 audit.selectionPath = string(selectionPath);
 audit.selectionThresholdLog = selection.thresholdLog;
 audit.selectionThresholdRawEquivalent = selection.thresholdRawEquivalent;

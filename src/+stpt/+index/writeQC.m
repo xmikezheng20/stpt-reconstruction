@@ -81,7 +81,10 @@ fprintf(fid, "  Mosaic channels field: %g (ch3 was not retained)\n\n", ...
     metadata.channels);
 
 fprintf(fid, "Acquisition geometry\n");
-fprintf(fid, "  Sections: %d\n", metadata.sections);
+fprintf(fid, "  Planned sections in metadata: %d\n", metadata.sections);
+fprintf(fid, "  Processing sections: %d:%d (%d total)\n", ...
+    cfg.processing.sections(1), cfg.processing.sections(end), ...
+    numel(cfg.processing.sections));
 fprintf(fid, "  Layers/section: %d\n", geometry.layersPerSection);
 fprintf(fid, "  Grid: %d x %d tiles\n", geometry.gridSize);
 fprintf(fid, "  Raw tile: %d x %d pixels\n", geometry.tileSizePixels);
@@ -118,6 +121,8 @@ end
 
 fprintf(fid, "Stage 1 passed\n");
 fprintf(fid, "Sections indexed: %d\n", height(inventory));
+fprintf(fid, "Processing range: %d:%d\n", ...
+    cfg.processing.sections(1), cfg.processing.sections(end));
 fprintf(fid, "Positions per section: %d\n", unique(inventory.positionCount));
 for channel = datasetIndex.channels'
     field = sprintf("ch%dFileCount", channel.id);

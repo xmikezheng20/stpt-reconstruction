@@ -10,6 +10,8 @@ nChannels = numel(cfg.channels);
 nTiles = prod(cfg.acquisition.gridSize);
 nLayers = cfg.acquisition.layersPerSection;
 expectedFileCount = nTiles * nLayers;
+processingSections = cfg.processing.sections(:);
+nSections = numel(processingSections);
 
 % Resolve each configured channel to its native root and discover only numbered
 % section directories. Unrelated directories such as ch1/trigger are ignored.
@@ -27,14 +29,17 @@ for c = 1:nChannels
     sectionMaps{c} = discoverSections(channels(c).root);
 end
 
-% Require identical, complete section coverage before combining channel data.
-expectedSections = (1:cfg.acquisition.sectionCount)';
+% Require every requested section in every channel. Directories outside the
+% processing range are deliberately ignored, which permits an incomplete tail.
 for c = 1:nChannels
-    if ~isequal(sectionMaps{c}.sectionNumber, expectedSections)
+    [present, locations] = ismember( ...
+        processingSections, sectionMaps{c}.sectionNumber);
+    if any(~present)
         error("stpt:SectionSequence", ...
-            "Channel %d does not contain exactly sections 1:%d.", ...
-            channels(c).id, cfg.acquisition.sectionCount);
+            "Channel %d is missing requested sections: %s.", ...
+            channels(c).id, mat2str(processingSections(~present)'));
     end
+    sectionMaps{c} = sectionMaps{c}(locations, :);
 end
 
 % Read geometry from the designated metadata channel. In this dataset the
@@ -56,22 +61,22 @@ emptySection = struct("number", [], "mosaicPath", "", ...
     "channelDirectories", strings(1, nChannels), ...
     "channelFiles", {cell(1, nChannels)}, "positions", table(), ...
     "nativeStartIndex", [], "nativeEndIndex", []);
-sections = repmat(emptySection, cfg.acquisition.sectionCount, 1);
-fileCounts = zeros(cfg.acquisition.sectionCount, nChannels);
-positionCounts = zeros(cfg.acquisition.sectionCount, 1);
-metadataStartNumbers = zeros(cfg.acquisition.sectionCount, 1);
-residualRmsXUm = zeros(cfg.acquisition.sectionCount, 1);
-residualRmsYUm = zeros(cfg.acquisition.sectionCount, 1);
-residualMaxUm = zeros(cfg.acquisition.sectionCount, 1);
+sections = repmat(emptySection, nSections, 1);
+fileCounts = zeros(nSections, nChannels);
+positionCounts = zeros(nSections, 1);
+metadataStartNumbers = zeros(nSections, 1);
+residualRmsXUm = zeros(nSections, 1);
+residualRmsYUm = zeros(nSections, 1);
+residualMaxUm = zeros(nSections, 1);
 
 fprintf("  Master Mosaic: %s\n", masterPath);
-fprintf("  Discovering %d sections across %d channels...\n", ...
-    cfg.acquisition.sectionCount, nChannels);
+fprintf("  Indexing %d requested sections (%d:%d) across %d channels...\n", ...
+    nSections, processingSections(1), processingSections(end), nChannels);
 
 % Index one physical section at a time. The Mosaic startnum supplies the native
 % global TIFF span; filenames within every channel must agree with that span.
-for s = 1:cfg.acquisition.sectionCount
-    sectionNumber = expectedSections(s);
+for s = 1:nSections
+    sectionNumber = processingSections(s);
     channelDirectories = strings(1, nChannels);
     channelFiles = cell(1, nChannels);
 
@@ -120,13 +125,12 @@ for s = 1:cfg.acquisition.sectionCount
         positions.targetResidualYUm));
 
     if mod(s, 25) == 0 || s == 1
-        fprintf("    indexed section %d/%d\n", s, cfg.acquisition.sectionCount);
+        fprintf("    indexed section %d/%d\n", s, nSections);
     end
 end
 
-% Confirm that consecutive sections form one continuous native TIFF sequence.
-expectedStartNumbers = (0:expectedFileCount: ...
-    expectedFileCount * (cfg.acquisition.sectionCount - 1))';
+% Native numbering remains global when processing begins after section one.
+expectedStartNumbers = (processingSections - 1) * expectedFileCount;
 if ~isequal(metadataStartNumbers, expectedStartNumbers)
     error("stpt:SectionStartSequence", ...
         "Section startnum values are not the expected contiguous native sequence.");
@@ -134,7 +138,7 @@ end
 
 % The inventory is intentionally compact so dataset-wide integrity can be
 % inspected without loading the much larger per-tile index MAT file.
-sectionInventory = table(expectedSections, positionCounts, ...
+sectionInventory = table(processingSections, positionCounts, ...
     metadataStartNumbers, residualRmsXUm, residualRmsYUm, residualMaxUm, ...
     'VariableNames', {'sectionNumber', 'positionCount', ...
     'metadataStartNumber', 'targetResidualRmsXUm', ...
@@ -189,6 +193,7 @@ datasetIndex = struct();
 datasetIndex.schemaVersion = 1;
 datasetIndex.created = string(datetime("now"));
 datasetIndex.rawRoot = cfg.paths.rawRoot;
+datasetIndex.processingSections = processingSections';
 datasetIndex.channels = channels;
 datasetIndex.masterMosaic = masterMosaic;
 datasetIndex.geometry = geometry;

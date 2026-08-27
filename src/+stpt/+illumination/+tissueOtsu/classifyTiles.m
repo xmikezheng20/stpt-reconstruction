@@ -56,6 +56,7 @@ selection.created = string(datetime("now"));
 selection.method = "tissueOtsu";
 selection.referenceChannel = channelId;
 selection.trainingSections = sections;
+selection.qcSections = cfg.illumination.qcSections(:)';
 selection.cropPixels = crop;
 selection.thresholdLog = thresholdLog;
 selection.thresholdRawEquivalent = thresholdRawEquivalent;
@@ -91,7 +92,8 @@ end
 
 function validateInputs(datasetIndex, cfg)
 % Validate only the assumptions consumed by this selection method.
-required = ["method", "tissueReferenceChannel", "trainingSections"];
+required = ["method", "tissueReferenceChannel", "trainingSections", ...
+    "qcSections"];
 for field = required
     if ~isfield(cfg.illumination, field)
         error("stpt:TissueOtsuConfig", ...
@@ -111,6 +113,11 @@ if any(~ismember(cfg.illumination.trainingSections, ...
         [datasetIndex.sections.number]))
     error("stpt:TissueOtsuConfig", ...
         "Training sections must be present in the dataset index.");
+end
+if any(~ismember(cfg.illumination.qcSections, ...
+        cfg.illumination.trainingSections))
+    error("stpt:TissueOtsuConfig", ...
+        "QC sections must be part of the illumination training sample.");
 end
 if ~isequal(cfg.preprocessing.cropPixels, datasetIndex.geometry.cropPixels)
     error("stpt:TissueOtsuConfig", ...

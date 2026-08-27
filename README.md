@@ -13,34 +13,31 @@ Raw acquisition files are never renamed or rewritten.
 
 ## Implemented stages
 
-Stage 1 builds and validates the complete dataset index. It parses acquisition
+Stage 1 builds and validates the requested dataset index. It parses acquisition
 metadata, maps each TIFF to section/layer/tile/channel coordinates, reconstructs
-the commanded 14-by-18 scan grid, and writes auditable tables and QC plots.
+the commanded 14-by-18 scan grid, and writes auditable tables and QC plots. The
+default range is the complete planned acquisition, but an explicit start/stop
+range can exclude an incomplete acquisition tail.
 
-Stage 2 is an illumination-calibration pilot on representative sections. It
-calculates compact tile statistics, applies StitchIt's detector-floor rule,
-estimates uncropped odd/even row templates, and collates provisional correction
-fields. It does not write corrected TIFFs or perform stitching. A retained
-tile is merely above the estimated detector floor; it is not classified as tissue.
+Stage 2 estimates illumination on regularly sampled sections. The default
+`tissueOtsu` method pools cropped green-tile means, applies one binary Otsu
+threshold to `log(1 + mean)`, and records the resulting physical tile mask. It
+then directly pools the selected locations across sections to fit odd/even
+illumination templates for each channel and layer. The estimator uses a 10%
+pixelwise trimmed mean, zero additive offset, and StitchIt's median-normalized
+gain construction. It does not write corrected TIFFs or perform stitching.
 
-Stage 2 is a reference baseline, not an accepted final calibration. Its compact QC
-shows the sorted tile means, their spatial distribution, representative raw tiles,
-and the agreement between odd/even template fields.
-
-The alternative `tissueOtsu` method has two explicit checkpoints. Checkpoint 1
-pools cropped green-tile means across the configured training sections, applies
-one binary Otsu threshold to `log(1 + mean)`, and records the resulting physical
-tile mask. Checkpoint 2 reuses that exact mask and directly pools selected tiles
-across sections to fit odd/even illumination templates for each channel and layer.
-It uses a 10% pixelwise trimmed mean, zero additive offset, and the same
-median-normalized gain construction as the reference method.
+For auditability, Stage 2 retains separate selection and model subdirectories,
+but the master runner executes them as one operational stage. The optional
+`stitchitReference` method remains available as a detector-floor baseline; its
+retained tiles are not a tissue classification.
 
 Illumination fitting is method-specific, but every method returns the same cropped
 offset-and-gain model. `fitModel` dispatches fitting, `validateModel` enforces the
 model contract, and `applyModel` applies the clear pointwise calculation
-`(croppedRaw - offset) .* gain`. Green/ch2 is the configurable default tissue-
-reference channel for future tissue-aware methods; the current reference method
-does not use tissue classification.
+`(croppedRaw - offset) .* gain`. Green/ch2 is the configurable tissue-reference
+channel for `tissueOtsu`; the optional StitchIt-reference method does not use
+tissue classification.
 
 Run it from the repository root:
 
@@ -52,10 +49,24 @@ runStptReconstruction(config_260812_MikeZ_PO431109_F_01());
 The master runner will eventually orchestrate all reconstruction stages from the
 same experiment config.
 
-Representative sections are configured by a start and interval rather than a
-copied list. With `firstSection = 1` and `everyNSections = 50`, both Stage 1 QC
-and illumination fitting use sections `1, 51, 101, 151, 201, 251`; the final
-section is not appended automatically.
+Computation and visualization have independent regular samples. With
+`illuminationEveryNSections = 10`, Stage 2 fitting uses sections
+`1, 11, ..., 291`; with `qcEveryNSections = 50`, Stage 1/2 plots and the later
+fusion pilot use `1, 51, 101, 151, 201, 251`. Final sections are not appended
+automatically.
+
+The planned metadata count remains `cfg.acquisition.sectionCount`. To process
+only a complete prefix or subset, override the reconstruction range explicitly:
+
+```matlab
+cfg = config_260812_MikeZ_PO431109_F_01();
+cfg.processing.sectionStart = 1;
+cfg.processing.sectionStop = 260;
+runStptReconstruction(cfg);
+```
+
+Sections outside this range are ignored. Every requested section must still be
+complete and present in every configured channel.
 
 Completed stage directories are protected from accidental replacement. To
 intentionally replace the requested terminal stage, set
@@ -72,9 +83,9 @@ cfg.execution.stopAfter = "index";
 runStptReconstruction(cfg);
 ```
 
-The experiment config currently stops after Checkpoint 2. Tissue selection is
+The experiment config currently stops after Stage 2. Tissue selection is
 stored under `02_illumination/tissue_otsu/01_selection`; the fitted model is
-stored separately under `02_illumination/tissue_otsu/02_model`. Neither checkpoint
+stored separately under `02_illumination/tissue_otsu/02_model`. Neither substep
 writes corrected TIFFs.
 
 ## Code organization

@@ -4,7 +4,7 @@ function cfg = validateConfig(cfg)
 % Require the groups used before a stage-specific algorithm is dispatched.
 % Method-specific illumination fields are checked at that module's interface.
 requiredTopLevel = ["experiment", "paths", "channels", "acquisition", ...
-    "stitching", "preprocessing", "sampling", "execution"];
+    "stitching", "preprocessing", "processing", "sampling", "execution"];
 for field = requiredTopLevel
     if ~isfield(cfg, field)
         error("stpt:MissingConfig", "Missing cfg.%s.", field);
@@ -65,22 +65,40 @@ if any(retainedSize <= targetStepPixels)
         "Cropping must leave positive overlap at the configured target step.");
 end
 
-% Resolve the user-facing interval once. Both Stage 1 QC and illumination
-% fitting consume this exact list, which is retained in resolved_config.mat.
-firstSection = cfg.sampling.firstSection;
-everyNSections = cfg.sampling.everyNSections;
-if ~isscalar(firstSection) || ~isfinite(firstSection) || ...
-        firstSection < 1 || mod(firstSection, 1) ~= 0 || ...
-        ~isscalar(everyNSections) || ~isfinite(everyNSections) || ...
-        everyNSections < 1 || mod(everyNSections, 1) ~= 0 || ...
-        firstSection > cfg.acquisition.sectionCount
-    error("stpt:SectionSampling", ...
-        "Section sampling requires an in-range integer firstSection and " + ...
-        "a positive integer everyNSections.");
+% Resolve the exact reconstruction range. The acquisition count remains the
+% planned metadata value even when only a complete prefix or subset is used.
+if ~isPositiveInteger(cfg.acquisition.sectionCount)
+    error("stpt:SectionCount", ...
+        "cfg.acquisition.sectionCount must be a positive integer.");
 end
-cfg.sampling.sections = firstSection:everyNSections: ...
-    cfg.acquisition.sectionCount;
-cfg.qc.representativeSections = cfg.sampling.sections;
+sectionStart = cfg.processing.sectionStart;
+sectionStop = cfg.processing.sectionStop;
+if ~isPositiveInteger(sectionStart) || ~isPositiveInteger(sectionStop) || ...
+        sectionStart > sectionStop || ...
+        sectionStop > cfg.acquisition.sectionCount
+    error("stpt:ProcessingSections", ...
+        "Processing sections require integer 1 <= sectionStart <= " + ...
+        "sectionStop <= acquisition.sectionCount.");
+end
+cfg.processing.sections = sectionStart:sectionStop;
+
+% Illumination computation and visual QC deliberately use different regular
+% samples, both anchored at the requested processing start.
+illuminationStride = cfg.sampling.illuminationEveryNSections;
+qcStride = cfg.sampling.qcEveryNSections;
+if ~isPositiveInteger(illuminationStride) || ~isPositiveInteger(qcStride)
+    error("stpt:SectionSampling", ...
+        "Illumination and QC section intervals must be positive integers.");
+end
+if mod(qcStride, illuminationStride) ~= 0
+    error("stpt:SectionSampling", ...
+        "qcEveryNSections must be a multiple of " + ...
+        "illuminationEveryNSections.");
+end
+cfg.sampling.illuminationSections = ...
+    sectionStart:illuminationStride:sectionStop;
+cfg.sampling.qcSections = sectionStart:qcStride:sectionStop;
+cfg.qc.representativeSections = cfg.sampling.qcSections;
 
 % Keep the initial implementation deliberately narrow and auditable.
 if ~strcmpi(cfg.stitching.positionSource, "target")
@@ -99,10 +117,17 @@ if ~strcmpi(cfg.execution.stopAfter, "index") && ...
         "Stage 2 requires cfg.illumination.");
 end
 if isfield(cfg, "illumination")
-    cfg.illumination.trainingSections = cfg.sampling.sections;
+    cfg.illumination.trainingSections = ...
+        cfg.sampling.illuminationSections;
+    cfg.illumination.qcSections = cfg.sampling.qcSections;
 end
 
 % Normalize filesystem values once so downstream code uses one path type.
 cfg.paths.rawRoot = string(cfg.paths.rawRoot);
 cfg.paths.outputRoot = string(cfg.paths.outputRoot);
+end
+
+function tf = isPositiveInteger(value)
+tf = isscalar(value) && isfinite(value) && value >= 1 && ...
+    mod(value, 1) == 0;
 end

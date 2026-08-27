@@ -24,7 +24,7 @@ cfg.channels = struct( ...
     "fileCode",  {"01", "02"});
 
 cfg.acquisition.metadataChannel = 1;
-cfg.acquisition.sectionCount = 300;
+cfg.acquisition.sectionCount = 300; % Planned count recorded in Mosaic metadata
 cfg.acquisition.layersPerSection = 2;
 cfg.acquisition.sectionThicknessUm = 25;
 cfg.acquisition.pixelSizeUm = [1, 1];       % [x, y]
@@ -42,10 +42,15 @@ cfg.stitching.targetStepUm = [700, 700];     % [x, y]
 % Cropping changes retained support, but does not define tile placement.
 cfg.preprocessing.cropPixels = [15, 15, 15, 15]; % [left right top bottom]
 
-% Use one regular section sample for geometry QC and illumination fitting.
-% The final section is not appended when it does not fall on this sequence.
-cfg.sampling.firstSection = 1;
-cfg.sampling.everyNSections = 50;
+% Process the complete planned acquisition by default. For a partial dataset,
+% explicitly move sectionStop back to the last section known to be complete.
+cfg.processing.sectionStart = 1;
+cfg.processing.sectionStop = cfg.acquisition.sectionCount;
+
+% Illumination fitting uses a denser volume sample than diagnostic plots and
+% the later fusion pilot. Final sections are not appended to either sequence.
+cfg.sampling.illuminationEveryNSections = 10;
+cfg.sampling.qcEveryNSections = 50;
 
 % Shared illumination interface. The initial alternative method uses one global
 % log-Otsu threshold on cropped green tiles to select tissue-bearing locations.

@@ -35,7 +35,7 @@ end
 
 function plotSelectionMaps(selection, outputPath)
 % Confirm that selected tiles follow tissue rather than the acquisition floor.
-sections = selection.trainingSections;
+sections = selection.qcSections;
 nLayers = max(selection.tiles.layer);
 fig = figure("Visible", "off", "Color", "w", ...
     "Position", [100, 100, 1000, 300 * numel(sections)]);
@@ -81,6 +81,7 @@ end
 fprintf(fid, "Tissue-Otsu selection checkpoint completed\n");
 fprintf(fid, "Reference channel: ch%d\n", selection.referenceChannel);
 fprintf(fid, "Training sections: %s\n", mat2str(selection.trainingSections));
+fprintf(fid, "QC sections: %s\n", mat2str(selection.qcSections));
 fprintf(fid, "Crop [left right top bottom]: %s pixels\n", ...
     mat2str(selection.cropPixels));
 fprintf(fid, "Threshold on log(1 + cropped mean): %.9g\n", ...

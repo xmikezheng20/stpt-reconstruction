@@ -14,7 +14,7 @@ end
 for c = 1:numel(datasetIndex.channels)
     channelId = datasetIndex.channels(c).id;
     for layer = 1:datasetIndex.geometry.layersPerSection
-        for sectionNumber = audit.trainingSections
+        for sectionNumber = audit.qcSections
             keep = audit.tileStatistics.sectionNumber == sectionNumber & ...
                 audit.tileStatistics.channelId == channelId & ...
                 audit.tileStatistics.layer == layer;

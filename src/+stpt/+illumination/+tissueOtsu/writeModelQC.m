@@ -60,6 +60,7 @@ end
 
 fprintf(fid, "Tissue-Otsu direct pooled illumination model completed\n");
 fprintf(fid, "Training sections: %s\n", mat2str(model.trainingSections));
+fprintf(fid, "QC sections: %s\n", mat2str(audit.qcSections));
 fprintf(fid, "Selection source: %s\n", audit.selectionPath);
 fprintf(fid, "Selection threshold log: %.9g\n", ...
     audit.selectionThresholdLog);
