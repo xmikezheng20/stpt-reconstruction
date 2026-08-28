@@ -27,6 +27,8 @@ cropped = single(rawTile( ...
     crop(3)+1:end-crop(4), crop(1)+1:end-crop(2)));
 
 layerModel = model.channels(channelPosition).layers(layer);
+% Pooled models deliberately store the same correction in both slots. The
+% parity lookup therefore remains the sole application path for both modes.
 if mod(gridY, 2) == 1
     offset = layerModel.offset.oddRows;
     gain = layerModel.gain.oddRows;

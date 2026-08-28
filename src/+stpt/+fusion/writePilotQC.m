@@ -43,7 +43,7 @@ for c = 1:nChannels
     end
 end
 
-plotChannelLayers(datasetIndex, sectionNumber, previews, displayLimits, ...
+plotChannelLayers(datasetIndex, cfg, sectionNumber, previews, displayLimits, ...
     fullfile(qcDir, "center_section_channels_layers.png"));
 plotChannelOverlay(datasetIndex, sectionNumber, previews, displayLimits, ...
     fullfile(qcDir, "center_section_red_green_overlay.png"));
@@ -53,7 +53,7 @@ writeSummary(datasetIndex, cfg, sectionNumber, manifest, ...
     fullfile(stageDir, "fusion_summary.txt"));
 end
 
-function plotChannelLayers(datasetIndex, sectionNumber, previews, ...
+function plotChannelLayers(datasetIndex, cfg, sectionNumber, previews, ...
         displayLimits, outputPath)
 % Show all canonical center-section planes without independently rescaling layers.
 nChannels = numel(datasetIndex.channels);
@@ -75,8 +75,8 @@ for c = 1:nChannels
             datasetIndex.channels(c).name, layer));
     end
 end
-sgtitle(sprintf("Section %d: illumination-corrected overwrite fusion", ...
-    sectionNumber));
+sgtitle(sprintf("Section %d: illumination-corrected %s fusion", ...
+    sectionNumber, fusionModeLabel(cfg)));
 exportgraphics(fig, outputPath, "Resolution", 160);
 close(fig);
 end
@@ -140,12 +140,9 @@ inset = zeros(insetYEnd - insetYStart + 1, ...
 
 for row = 1:height(geometry.placements)
     placement = geometry.placements(row, :);
-    raw = stpt.io.loadTile(datasetIndex, sectionNumber, layer, ...
-        placement.acquisitionIndex, referenceChannel);
-    corrected = stpt.illumination.applyModel(raw, model, ...
-        referenceChannel, layer, placement.gridY);
-    corrected = stpt.preprocessing.applyTileOrientation( ...
-        corrected, cfg.preprocessing.tileOrientation);
+    corrected = stpt.fusion.prepareTile( ...
+        datasetIndex, model, cfg, sectionNumber, layer, referenceChannel, ...
+        placement.acquisitionIndex, placement.gridY);
     displayTile = uint8(round(255 * normalizeForDisplay(corrected, limits)));
 
     % True grid parity yields a stable checkerboard independent of acquisition
@@ -234,7 +231,14 @@ fprintf(fid, "Derived overlap: %d x %d pixels\n", ...
     geometry.postCropOverlapPixels);
 fprintf(fid, "Stitched canvas: %d x %d pixels\n", ...
     geometry.nominalCanvasSizePixels);
-fprintf(fid, "Fusion: reverse-acquisition overwrite; earlier tiles win\n");
+if strcmpi(cfg.fusion.mode, "overwrite")
+    fprintf(fid, ...
+        "Fusion: reverse-acquisition overwrite; earlier tiles win\n");
+else
+    fprintf(fid, ...
+        "Fusion: Fiji-style normalized weighted blending; alpha %.6g\n", ...
+        cfg.fusion.blending.alpha);
+end
 fprintf(fid, "Per-tile orientation: %s after illumination correction\n", ...
     string(cfg.preprocessing.tileOrientation));
 fprintf(fid, "Final mosaic orientation transform: none\n");
@@ -256,4 +260,15 @@ fprintf(fid, "Raw TIFFs modified: no\n");
 fprintf(fid, "Corrected tile TIFFs written: no\n");
 fprintf(fid, "Completed: %s\n", string(datetime("now")));
 fclose(fid);
+end
+
+function label = fusionModeLabel(cfg)
+switch lower(string(cfg.fusion.mode))
+    case "overwrite"
+        label = "overwrite";
+    case "fijiblend"
+        label = "Fiji-blended";
+    otherwise
+        label = string(cfg.fusion.mode);
+end
 end

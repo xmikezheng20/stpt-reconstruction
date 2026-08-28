@@ -60,7 +60,9 @@ cfg.sampling.qcEveryNSections = 50;
 % Shared illumination interface. The initial alternative method uses one global
 % log-Otsu threshold on cropped green tiles to select tissue-bearing locations.
 cfg.illumination.method = "tissueOtsu";
-cfg.illumination.rowMode = "split";
+% A pooled model applies one correction field to every scan row. Set this to
+% "split" only when odd/even acquisition directions differ materially.
+cfg.illumination.rowMode = "pool";
 cfg.illumination.tissueReferenceChannel = 2;
 
 % Direct pooled template estimator used after the tissue-selection checkpoint.
@@ -79,11 +81,13 @@ cfg.illumination.stitchitReference.acrossSectionTrimPercent = 10;
 cfg.fusion.mode = "overwrite";
 cfg.fusion.compression = "lzw";
 cfg.fusion.qcPreviewScale = 0.10;
+cfg.fusion.blending.method = "fijiDistance";
+cfg.fusion.blending.alpha = 1.5;
 
-% Optional scientific comparisons are isolated from the canonical pipeline.
-% This reconstructs full-resolution correction-on/off variants for every
-% configured channel and layer through the same fusion interface.
-cfg.qc.comparisons.xyIllumination = true;
+% Reconstruct three matched full-resolution pilot variants: no correction
+% with overwrite, corrected illumination with overwrite, and corrected
+% illumination with Fiji-style blending.
+cfg.qc.comparisons.reconstructionSteps = true;
 
 % Development checkpoint: reconstruct the center section in every configured
 % channel and optical layer, then write compact fusion QC.

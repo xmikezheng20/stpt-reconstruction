@@ -10,43 +10,54 @@ writeSummary(audit, model, fullfile(stageDir, "stage_summary.txt"));
 end
 
 function plotGainFields(model, outputPath)
-% Display all eight fields on one common scale for direct visual comparison.
+% Display each distinct fitted field on one common scale.
 nChannels = numel(model.channels);
 nLayers = numel(model.channels(1).layers);
+isPooled = strcmpi(model.rowMode, "pool");
 allGains = [];
 for c = 1:nChannels
     for layer = 1:nLayers
         allGains = [allGains; ...
-            model.channels(c).layers(layer).gain.oddRows(:); ...
-            model.channels(c).layers(layer).gain.evenRows(:)]; %#ok<AGROW>
+            model.channels(c).layers(layer).gain.oddRows(:)]; %#ok<AGROW>
+        if ~isPooled
+            allGains = [allGains; ...
+                model.channels(c).layers(layer).gain.evenRows(:)]; %#ok<AGROW>
+        end
     end
 end
 colorLimits = double(prctile(allGains, [1, 99]));
 
 fig = figure("Visible", "off", "Color", "w", ...
     "Position", [100, 100, 1600, 750]);
-tiledlayout(nChannels, nLayers * 2, ...
+fieldsPerLayer = 2 - isPooled;
+tiledlayout(nChannels, nLayers * fieldsPerLayer, ...
     "Padding", "compact", "TileSpacing", "compact");
 
 for c = 1:nChannels
     for layer = 1:nLayers
         layerModel = model.channels(c).layers(layer);
-        for parity = ["odd", "even"]
+        if isPooled
+            rowFields = "pool";
+        else
+            rowFields = ["odd", "even"];
+        end
+        for rowField = rowFields
             nexttile
-            if parity == "odd"
-                gain = layerModel.gain.oddRows;
-            else
+            if rowField == "even"
                 gain = layerModel.gain.evenRows;
+            else
+                gain = layerModel.gain.oddRows;
             end
             imagesc(gain, colorLimits);
             axis image off
             colorbar
             title(sprintf("ch%d layer %d %s", ...
-                model.channels(c).id, layer, parity));
+                model.channels(c).id, layer, rowField));
         end
     end
 end
-sgtitle("Direct pooled illumination gains (common 1st-99th percentile scale)");
+sgtitle(sprintf("Illumination gains: %s rows (common 1st-99th percentile scale)", ...
+    model.rowMode));
 exportgraphics(fig, outputPath, "Resolution", 160);
 close(fig);
 end
@@ -68,6 +79,7 @@ fprintf(fid, "Selection threshold raw equivalent: %.9g\n", ...
     audit.selectionThresholdRawEquivalent);
 fprintf(fid, "Template trim: %.3g%%\n", ...
     model.methodDetails.templateTrimPercent);
+fprintf(fid, "Row mode: %s\n", model.rowMode);
 fprintf(fid, "Templates: direct pooling across sections; no section averages\n");
 fprintf(fid, "Additive offset: zero\n");
 fprintf(fid, "Model support: cropped %d-by-%d pixels\n", ...

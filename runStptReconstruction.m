@@ -91,7 +91,7 @@ end
 result.fusionManifest = fusionManifest;
 result.fusionDirectory = fusionDir;
 if ~isempty(comparisonManifest)
-    result.xyIlluminationComparisonManifest = comparisonManifest;
+    result.reconstructionStepComparisonManifest = comparisonManifest;
 end
 end
 
@@ -249,8 +249,8 @@ stpt.fusion.writePilotQC( ...
 % Optional comparisons are independent products. They use the same fusion
 % interface but never source planes from the canonical stitched tree.
 comparisonManifest = table();
-if cfg.qc.comparisons.xyIllumination
-    comparisonManifest = stpt.fusion.writeXYIlluminationComparison( ...
+if cfg.qc.comparisons.reconstructionSteps
+    comparisonManifest = stpt.fusion.writeReconstructionStepComparison( ...
         datasetIndex, model, cfg, sectionNumber, stageDir);
 end
 

@@ -23,7 +23,10 @@ Stage 2 estimates illumination on regularly sampled sections. The default
 `tissueOtsu` method pools cropped green-tile means, applies one binary Otsu
 threshold to `log(1 + mean)`, and records the resulting physical tile mask. It
 then directly pools the selected locations across sections to fit odd/even
-illumination templates for each channel and layer. The estimator uses a 10%
+illumination templates for each channel and layer. By default, their
+count-weighted pooled field supplies one correction for all tile rows; `split`
+remains available when odd/even scan directions differ materially. The
+estimator uses a 10%
 pixelwise trimmed mean, zero additive offset, and StitchIt's median-normalized
 gain construction. It does not write corrected TIFFs or perform stitching.
 
@@ -55,14 +58,22 @@ fusion, writer, output paths, and manifest. The pilot differs only by supplying
 one derived center section and requesting detailed QC. Its completed planes can
 therefore be reused when production expands to all processing sections.
 
-The optional `cfg.qc.comparisons.xyIllumination` flag independently reconstructs
-illumination-on and illumination-off versions of every pilot channel/layer
-plane. Both variants use the same crop, model-application interface, tile
-orientation, fusion, and lossless writer; the off condition supplies an identity
-model with `D=0` and `G=1`. Full-resolution TIFFs, a combined manifest, and one
-matched off/on/difference overview are kept together under
-`03_fusion/qc/comparisons/xy_illumination`. Neither variant is copied from or
-linked to the canonical stitched output.
+The optional `cfg.qc.comparisons.reconstructionSteps` flag independently
+reconstructs three versions of every pilot channel/layer plane: no correction
+with overwrite, XY correction with overwrite, and XY correction with Fiji-style
+blending. All three use the same crop, model-application interface, tile
+orientation, plane processor, and lossless writer. Full-resolution TIFFs, a
+combined manifest and input signature, a complete-field overview, and
+native-resolution junctions are kept together under
+`03_fusion/qc/comparisons/reconstruction_steps`.
+Comparison variants are never copied from or linked to canonical output.
+
+Fiji blending follows OpenSTP's `fusionMethod=3`: each corrected tile is
+weighted by `((dx+1)*(dy+1)+1)^alpha`, accumulated on the recorded target grid,
+and divided by the accumulated weights. The current `alpha=1.5` matches
+OpenSTP. The common weight image is scaled to a maximum of one before
+single-precision accumulation; this global scale cancels exactly in the
+normalized result. Clipping and uint16 conversion happen only after blending.
 
 Run it from the repository root:
 
@@ -128,7 +139,7 @@ The package is divided by responsibility:
 | `stpt.illumination.stitchitReference` | Implement only the StitchIt-reference estimation algorithm and its QC. |
 | `stpt.illumination.tissueOtsu` | Select tissue-bearing tiles with green-channel log-Otsu and fit direct pooled templates. |
 | `stpt.preprocessing` | Apply the explicit native-TIFF-to-target-grid tile orientation after illumination correction. |
-| `stpt.fusion` | Compute target-grid geometry, stream and fuse planes through a common output interface, write lossless TIFFs, and generate fusion QC. |
+| `stpt.fusion` | Compute target-grid geometry, prepare native tiles, dispatch overwrite or Fiji-style fusion, write lossless TIFFs, and generate fusion QC. |
 
 The master runner owns stage order and derived-output directories; scientific
 algorithms do not rename or reorganize raw files.
@@ -156,7 +167,8 @@ StitchIt source reference: `383b9fbd5f0664bf232c897a87759d8da43b725c`
 | `tissueOtsu.fit` | None | Reuses the completed selection and assembles all channel/layer/parity templates. |
 | `stpt.fusion.computeGeometry` | `stitching/gridPos2Pixels.m`, `utils/stagePos2PixelPos.m` | Independent target-grid implementation using the indexed 700-pixel commands; overlap is derived from retained support. |
 | `stpt.preprocessing.applyTileOrientation` | OpenSTP `readSectionParamFile3D.m` | Reproduces `fliplr(image')` as an explicit 90-degree clockwise turn after raw-orientation illumination correction. |
-| `stpt.fusion.fusePlane` | `stitching/stitcher.m` | Adapts reverse-acquisition, last-tile-wins overwrite; streams native tiles and omits BakingTray auto-ROI, marker values, and blending. |
+| `stpt.fusion.fuseOverwritePlane` | `stitching/stitcher.m` | Adapts reverse-acquisition, last-tile-wins overwrite; omits BakingTray auto-ROI and marker values. |
+| `stpt.fusion.fuseFijiBlendPlane` | OpenSTP `stitchMosaic.c`, `calcWeightImageAsInFiji.m` | Implements normalized Fiji-style distance weighting on our recorded target-grid placement; uses normalized single-precision weights and blockwise final casting. |
 | `stpt.fusion.writePilotQC` | `stitcher.m` chessboard mode (concept only) | Independent center-section previews, channel overlay, and lightweight red/green tile checkerboard. |
 
 Shared interface functions contain no StitchIt estimation logic:
@@ -164,27 +176,31 @@ Shared interface functions contain no StitchIt estimation logic:
 | Function | Contract |
 | --- | --- |
 | `stpt.illumination.fitModel` | Dispatch the configured method and return `model` plus `audit`. |
-| `stpt.illumination.buildModelFromTemplates` | Apply the shared crop, zero offset, median normalization, and gain construction. |
+| `stpt.illumination.buildModelFromTemplates` | Apply the shared crop, zero offset, median normalization, and pooled-or-split gain construction. |
 | `stpt.illumination.validateModel` | Require complete channel/layer coverage and finite positive cropped gains. |
-| `stpt.illumination.applyModel` | Crop, subtract the selected offset, and multiply by the selected odd/even gain; return `single` without hidden clipping or casting. |
+| `stpt.illumination.applyModel` | Crop, subtract the selected offset, and multiply by the model gain; return `single` without hidden clipping or casting. |
 | `stpt.illumination.identityModel` | Preserve the model contract while replacing every offset and gain with `D=0` and `G=1` for crop-only comparisons. |
-| `stpt.fusion.processPlanes` | Apply one supplied model and reconstruct any requested channel/layer planes into an explicit output root and manifest. |
-| `stpt.fusion.writeXYIlluminationComparison` | Independently reconstruct full-resolution illumination-on/off variants and assemble matched visual QC. |
+| `stpt.fusion.processPlanes` | Apply one supplied model and fusion configuration, then reconstruct requested planes into an explicit output root and manifest. |
+| `stpt.fusion.writeReconstructionStepComparison` | Independently reconstruct the ordered correction/blending variants and assemble matched visual QC. |
 
-Odd/even fields refer to the parity of the reconstructed target-grid row. In
-this dataset that parity exactly separates the two alternating directions of the
-serpentine acquisition; the names of the two groups are otherwise arbitrary.
+In `pool` mode, one correction is stored identically in both slots of the common
+model interface and is therefore applied to every tile row. In optional `split`
+mode, odd/even fields refer to reconstructed target-grid row parity. In this
+dataset that parity exactly separates the two alternating directions of the
+serpentine acquisition; the group names are otherwise arbitrary.
 
 ## Relationship to OpenSTP
 
 The legacy OpenSTP script crops 15 pixels, writes cropped and corrected tile
 trees, estimates one pooled channel/layer average from all tiles, and defaults
-to Fiji-style weighted blending. Its configured 12% overlap places an
-802-pixel retained tile at `floor(0.88 * 802) = 705` pixels. This pipeline keeps
-the 15-pixel crop and lossless LZW final output but applies correction in memory,
-uses the recorded 700-pixel target step, and starts with StitchIt's reverse-order
-overwrite fusion. Production downsampling will remain a separate final stage.
+to Fiji-style weighted blending with `alpha=1.5`. Its configured 12% overlap
+places an 802-pixel retained tile at `floor(0.88 * 802) = 705` pixels. This
+pipeline keeps the crop, normalized Fiji weight formula, and lossless LZW final
+output, but applies correction in memory and uses the recorded 700-pixel target
+step. StitchIt's reverse-order overwrite remains the canonical pilot mode until
+the three-step comparison is accepted. Production downsampling will remain a
+separate final stage.
 
 Planned extensions are production-wide fusion with compact every-50-section QC,
-optional blending after no-blend geometry is accepted, z illumination correction
-on fused optical-layer pairs, final downsampling, and plane-level parallelism.
+z illumination correction on the fused volume, final downsampling, and
+plane-level parallelism.

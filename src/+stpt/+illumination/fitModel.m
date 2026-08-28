@@ -32,9 +32,10 @@ for field = required
             "Missing cfg.illumination.%s.", field);
     end
 end
-if ~strcmpi(cfg.illumination.rowMode, "split")
+rowMode = lower(string(cfg.illumination.rowMode));
+if ~ismember(rowMode, ["pool", "split"])
     error("stpt:IlluminationConfig", ...
-        "The current implementation supports split odd/even fitting.");
+        "Illumination row mode must be 'pool' or 'split'.");
 end
 if any(~ismember(cfg.illumination.trainingSections, ...
         [datasetIndex.sections.number]))

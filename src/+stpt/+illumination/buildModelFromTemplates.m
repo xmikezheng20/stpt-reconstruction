@@ -8,7 +8,7 @@ model = struct();
 model.schemaVersion = 1;
 model.created = string(datetime("now"));
 model.method = string(cfg.illumination.method);
-model.rowMode = string(cfg.illumination.rowMode);
+model.rowMode = lower(string(cfg.illumination.rowMode));
 model.trainingSections = cfg.illumination.trainingSections(:)';
 model.tissueReferenceChannel = cfg.illumination.tissueReferenceChannel;
 model.cropPixels = cfg.preprocessing.cropPixels;
@@ -20,19 +20,30 @@ nLayers = datasetIndex.geometry.layersPerSection;
 channels = repmat(struct("id", [], "name", "", "layers", struct([])), ...
     nChannels, 1);
 
-% Construct one odd/even zero-offset gain pair for every channel and layer.
+% Construct one zero-offset gain model for every channel and layer. Pooled
+% models store the same gain in both parity slots so all downstream correction
+% and fusion code uses one stable interface.
 for c = 1:nChannels
     channels(c).id = datasetIndex.channels(c).id;
     channels(c).name = datasetIndex.channels(c).name;
     layers = repmat(emptyLayerModel(), nLayers, 1);
     for layer = 1:nLayers
         template = templates{c, layer};
-        [layers(layer).gain.oddRows, ...
-            layers(layer).normalization.oddRows] = templateGain( ...
-            template.oddRows, model.cropPixels);
-        [layers(layer).gain.evenRows, ...
-            layers(layer).normalization.evenRows] = templateGain( ...
-            template.evenRows, model.cropPixels);
+        if model.rowMode == "pool"
+            [pooledGain, pooledNormalization] = templateGain( ...
+                template.pooledRows, model.cropPixels);
+            layers(layer).gain.oddRows = pooledGain;
+            layers(layer).gain.evenRows = pooledGain;
+            layers(layer).normalization.oddRows = pooledNormalization;
+            layers(layer).normalization.evenRows = pooledNormalization;
+        else
+            [layers(layer).gain.oddRows, ...
+                layers(layer).normalization.oddRows] = templateGain( ...
+                template.oddRows, model.cropPixels);
+            [layers(layer).gain.evenRows, ...
+                layers(layer).normalization.evenRows] = templateGain( ...
+                template.evenRows, model.cropPixels);
+        end
     end
     channels(c).layers = layers;
 end

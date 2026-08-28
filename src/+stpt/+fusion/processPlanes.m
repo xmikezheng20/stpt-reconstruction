@@ -17,8 +17,8 @@ else
     previousManifest = table();
 end
 
-fprintf("Fusion: %d sections x %d layers x %d channels = %d planes.\n", ...
-    numel(sections), nLayers, nChannels, nPlanes);
+fprintf("Fusion (%s): %d sections x %d layers x %d channels = %d planes.\n", ...
+    cfg.fusion.mode, numel(sections), nLayers, nChannels, nPlanes);
 fprintf("Fusion output: %s\n", planeRoot);
 
 for sectionNumber = sections

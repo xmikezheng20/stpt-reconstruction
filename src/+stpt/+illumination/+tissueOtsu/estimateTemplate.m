@@ -44,8 +44,9 @@ for parity = ["odd", "even"]
 end
 
 template.poolN = template.oddN + template.evenN;
-% This pooled image is diagnostic when rowMode is split. Weighting by counts
-% makes it the mean of all selected tiles even when the parities differ by one.
+% Combine the parity templates into the single all-row field used by pool
+% mode. Count weighting reflects the selected tile population when tissue
+% selection leaves slightly different numbers of odd and even rows.
 oddWeight = single(template.oddN / template.poolN);
 evenWeight = single(template.evenN / template.poolN);
 template.pooledRows = template.oddRows .* oddWeight + ...

@@ -11,9 +11,10 @@ for field = required
     end
 end
 
-if ~strcmpi(model.rowMode, "split")
+rowMode = lower(string(model.rowMode));
+if ~ismember(rowMode, ["pool", "split"])
     error("stpt:IlluminationModel", ...
-        "The current model interface supports split odd/even fields only.");
+        "Illumination row mode must be 'pool' or 'split'.");
 end
 if ~isequal(model.inputTileSizePixels, ...
         datasetIndex.geometry.tileSizePixels) || ...
@@ -38,6 +39,14 @@ for c = 1:numel(model.channels)
         layer = channel.layers(layerIndex);
         validateParity(layer.offset.oddRows, layer.gain.oddRows, expectedSize);
         validateParity(layer.offset.evenRows, layer.gain.evenRows, expectedSize);
+        if rowMode == "pool" && (~isequal(layer.offset.oddRows, ...
+                layer.offset.evenRows) || ~isequal(layer.gain.oddRows, ...
+                layer.gain.evenRows) || ...
+                ~isequal(layer.normalization.oddRows, ...
+                layer.normalization.evenRows))
+            error("stpt:IlluminationModel", ...
+                "A pooled model must use one identical field for all rows.");
+        end
     end
 end
 end
