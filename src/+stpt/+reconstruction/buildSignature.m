@@ -27,6 +27,12 @@ if strcmpi(cfg.fusion.mode, "fijiBlend")
     signature.blendingMethod = string(cfg.fusion.blending.method);
     signature.blendingAlpha = cfg.fusion.blending.alpha;
 end
+signature.zIlluminationMethod = string(cfg.zIllumination.method);
+signature.zReferenceLayer = cfg.zIllumination.referenceLayer;
+signature.zMaxEstimationPixels = ...
+    cfg.zIllumination.maxEstimationPixels;
+signature.zFilterAreaFraction = ...
+    cfg.zIllumination.filterAreaFraction;
 signature.outputClass = "uint16";
 signature.compression = lower(string(cfg.fusion.compression));
 signature.finalOrientation = "none";

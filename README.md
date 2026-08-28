@@ -51,7 +51,10 @@ reproduces OpenSTP's `fliplr(image')`; no final mosaic transform is applied.
 Overlapping corrected tiles are combined with OpenSTP's Fiji-style normalized
 distance weights using `alpha=1.5`. The four channel/layer planes are canonical
 uint16 TIFFs with lossless LZW compression; no corrected tile intermediates are
-made.
+made. After fusion, deeper optical layers are matched to the broadly smoothed
+first layer using StitchIt's spatial-ratio z-illumination correction. All layers
+of one physical section/channel are processed together, and only final
+z-corrected TIFFs are written. A one-layer acquisition passes through unchanged.
 
 The pilot and future production reconstruction share the same geometry, plane
 fusion, TIFF writer, and manifest schema. They intentionally use independent
@@ -60,12 +63,13 @@ output. Production can therefore begin from one unambiguous clean stage after
 the pilot settings have been accepted.
 
 The optional `cfg.qc.comparisons.reconstructionSteps` flag independently
-reconstructs three versions of every pilot channel/layer plane: no correction
-with overwrite, XY correction with overwrite, and XY correction with Fiji-style
-blending. All three use the same crop, model-application interface, tile
-orientation, plane processor, and lossless writer. Full-resolution TIFFs, a
-combined manifest, a complete-field overview, and
-native-resolution junctions are kept together under
+reconstructs four versions of every pilot channel/layer plane: no correction
+with overwrite, XY correction with overwrite, XY correction with Fiji-style
+blending, and the complete XY-corrected/Fiji-blended/z-corrected result. All four
+use the same crop, model-application interface, tile orientation, section
+processor, and lossless writer. Full-resolution TIFFs, a combined manifest, a
+complete-field overview, native-resolution junctions, and z-gain fields are
+kept together under
 `03_reconstruction/pilot/qc/comparisons/reconstruction_steps`.
 Comparison variants are never copied from or linked to canonical output.
 
@@ -145,8 +149,9 @@ The package is divided by responsibility:
 | `stpt.illumination.stitchitReference` | Implement only the StitchIt-reference estimation algorithm and its QC. |
 | `stpt.illumination.tissueOtsu` | Select tissue-bearing tiles with green-channel log-Otsu and fit direct pooled templates. |
 | `stpt.preprocessing` | Apply the explicit native-TIFF-to-target-grid tile orientation after illumination correction. |
-| `stpt.fusion` | Compute target-grid geometry, prepare native tiles, dispatch overwrite or Fiji-style fusion, write lossless TIFFs, and generate fusion QC. |
-| `stpt.reconstruction` | Record stage-level reconstruction inputs and provenance. |
+| `stpt.fusion` | Compute target-grid geometry, prepare native tiles, and dispatch overwrite or Fiji-style mosaic fusion. |
+| `stpt.zillumination` | Apply the shared within-section optical-layer interface and StitchIt smooth-ratio correction. |
+| `stpt.reconstruction` | Group fused layers by section/channel, apply z correction, publish final TIFFs and manifests, record provenance, and generate pilot QC. |
 
 The master runner owns stage order and derived-output directories; scientific
 algorithms do not rename or reorganize raw files.
@@ -176,7 +181,8 @@ StitchIt source reference: `383b9fbd5f0664bf232c897a87759d8da43b725c`
 | `stpt.preprocessing.applyTileOrientation` | OpenSTP `readSectionParamFile3D.m` | Reproduces `fliplr(image')` as an explicit 90-degree clockwise turn after raw-orientation illumination correction. |
 | `stpt.fusion.fuseOverwritePlane` | `stitching/stitcher.m` | Adapts reverse-acquisition, last-tile-wins overwrite; omits BakingTray auto-ROI and marker values. |
 | `stpt.fusion.fuseFijiBlendPlane` | OpenSTP `stitchMosaic.c`, `calcWeightImageAsInFiji.m` | Implements normalized Fiji-style distance weighting on our recorded target-grid placement; uses normalized single-precision weights and blockwise final casting. |
-| `stpt.fusion.writePilotQC` | `stitcher.m` chessboard mode (concept only) | Independent center-section previews, channel overlay, and lightweight red/green tile checkerboard. |
+| `stpt.zillumination.stitchitSmoothRatio` | `+stitchit/+artifactCorrection/correctZilluminationInDirectory.m` | Close port of the reduced-resolution broad Gaussian and reference/target ratio; omits StitchIt's directory parsing, overwrite behavior, parallel pool logic, and uncompressed writer. |
+| `stpt.reconstruction.writePilotQC` | `stitcher.m` chessboard mode (concept only) | Independent final center-section previews, channel overlay, and lightweight red/green tile checkerboard. |
 
 Shared interface functions contain no StitchIt estimation logic:
 
@@ -187,8 +193,9 @@ Shared interface functions contain no StitchIt estimation logic:
 | `stpt.illumination.validateModel` | Require complete channel/layer coverage and finite positive cropped gains. |
 | `stpt.illumination.applyModel` | Crop, subtract the selected offset, and multiply by the model gain; return `single` without hidden clipping or casting. |
 | `stpt.illumination.identityModel` | Preserve the model contract while replacing every offset and gain with `D=0` and `G=1` for crop-only comparisons. |
-| `stpt.fusion.processPlanes` | Apply one supplied model and fusion configuration, then freshly reconstruct every requested plane into a new output root and return its manifest. |
-| `stpt.fusion.writeReconstructionStepComparison` | Independently reconstruct the ordered correction/blending variants and assemble matched visual QC. |
+| `stpt.zillumination.apply` | Apply the configured method to all optical layers from one physical section/channel; treat one layer as identity. |
+| `stpt.reconstruction.processSections` | Fuse complete section/channel layer groups, apply z illumination in memory, and publish only final planes plus their manifest. |
+| `stpt.reconstruction.writeReconstructionStepComparison` | Independently reconstruct the four ordered correction/blending/z-correction variants and assemble matched visual QC. |
 
 In `pool` mode, one correction is stored identically in both slots of the common
 model interface and is therefore applied to every tile row. In optional `split`
@@ -208,7 +215,5 @@ step. Fiji blending is the canonical fusion mode; reverse-order overwrite is
 retained only for the two controlled pilot comparisons. Production downsampling
 will remain a separate final stage.
 
-Planned extensions are z-illumination validation, a production-wide
-reconstruction whose final full-resolution TIFFs include the accepted z
-correction when needed, separate final downsampling, and plane-level
-parallelism.
+Planned extensions are production-wide reconstruction through the same
+section-level worker, separate final downsampling, and plane-level parallelism.

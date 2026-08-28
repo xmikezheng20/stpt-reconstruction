@@ -84,8 +84,14 @@ cfg.fusion.qcPreviewScale = 0.10;
 cfg.fusion.blending.method = "fijiDistance";
 cfg.fusion.blending.alpha = 1.5;
 
-% Keep the two overwrite conditions only as controls around the canonical
-% corrected, Fiji-blended reconstruction.
+% Match deeper optical layers to the broadly smoothed first layer after fusion.
+% These are the defaults in StitchIt's full-resolution z-correction function.
+cfg.zIllumination.method = "stitchitSmoothRatio";
+cfg.zIllumination.referenceLayer = 1;
+cfg.zIllumination.maxEstimationPixels = 1.5e6;
+cfg.zIllumination.filterAreaFraction = 0.01;
+
+% Reconstruct the ordered additions of XY correction, blending, and z correction.
 cfg.qc.comparisons.reconstructionSteps = true;
 
 % Development checkpoint: reconstruct the center section in every configured

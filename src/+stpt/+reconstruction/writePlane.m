@@ -1,5 +1,5 @@
 function writePlane(image, outputPath, compression)
-%WRITEPLANE Write one lossless TIFF through the shared fusion interface.
+%WRITEPLANE Atomically publish one final lossless reconstruction TIFF.
 
 % Write beside the final path, then rename only after imwrite succeeds.
 [folder, stem, extension] = fileparts(outputPath);

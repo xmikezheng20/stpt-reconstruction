@@ -1,10 +1,10 @@
 function comparisonManifest = writeReconstructionStepComparison( ...
         datasetIndex, model, cfg, sectionNumber, stageDir)
-%WRITERECONSTRUCTIONSTEPCOMPARISON Reconstruct three matched pilot variants.
+%WRITERECONSTRUCTIONSTEPCOMPARISON Reconstruct matched ordered pilot variants.
 %
-% The ordered comparison isolates the effect of XY illumination correction and
-% then Fiji-style blending. Every variant is independently reconstructed through
-% processPlanes; canonical TIFFs are neither copied nor reused.
+% The ordered comparison adds XY illumination correction, Fiji-style blending,
+% and finally z illumination. Every variant is independently reconstructed
+% through processSections; canonical TIFFs are neither copied nor reused.
 
 comparisonDir = string(fullfile(stageDir, "qc", "comparisons", ...
     "reconstruction_steps"));
@@ -17,12 +17,15 @@ fprintf("\nReconstruction-step comparison: section %d, all channels/layers.\n", 
 identity = stpt.illumination.identityModel(model);
 stpt.illumination.validateModel(identity, datasetIndex);
 
-steps = comparisonSteps(model, identity, cfg);
+steps = comparisonSteps( ...
+    model, identity, cfg, datasetIndex.geometry.layersPerSection);
 manifests = cell(numel(steps), 1);
+diagnostics = cell(numel(steps), 1);
 for stepNumber = 1:numel(steps)
     step = steps(stepNumber);
     stepDir = string(fullfile(comparisonDir, step.name));
-    manifest = stpt.fusion.processPlanes( ...
+    [manifest, diagnostics{stepNumber}] = ...
+        stpt.reconstruction.processSections( ...
         datasetIndex, step.model, step.cfg, sectionNumber, stepDir);
     manifest.stepNumber = repmat(stepNumber, height(manifest), 1);
     manifest.variant = repmat(step.name, height(manifest), 1);
@@ -39,6 +42,10 @@ plotOverview(datasetIndex, cfg, sectionNumber, comparisonManifest, steps, ...
 plotCentralJunctions( ...
     datasetIndex, sectionNumber, comparisonManifest, steps, ...
     fullfile(comparisonDir, "reconstruction_steps_central_junctions.png"));
+if numel(steps) == 4
+    plotZGainFields(datasetIndex, sectionNumber, diagnostics{4}, ...
+        fullfile(comparisonDir, "z_illumination_gain_fields.png"));
+end
 writeSummary(datasetIndex, model, cfg, sectionNumber, comparisonManifest, ...
     fullfile(comparisonDir, "comparison_summary.txt"));
 
@@ -47,12 +54,16 @@ fprintf("Reconstruction-step comparison complete: %d full-resolution planes.\n",
 fprintf("Outputs: %s\n\n", comparisonDir);
 end
 
-function steps = comparisonSteps(model, identity, cfg)
-% Define the three scientific conditions without changing shared interfaces.
+function steps = comparisonSteps(model, identity, cfg, nLayers)
+% Define ordered scientific conditions through the shared section interface.
 overwriteCfg = cfg;
 overwriteCfg.fusion.mode = "overwrite";
+overwriteCfg.zIllumination.method = "none";
 blendCfg = cfg;
 blendCfg.fusion.mode = "fijiBlend";
+blendCfg.zIllumination.method = "none";
+zBlendCfg = cfg;
+zBlendCfg.fusion.mode = "fijiBlend";
 
 steps = struct( ...
     "name", { ...
@@ -66,6 +77,17 @@ steps = struct( ...
     "illumination", {"identity", string(model.method), string(model.method)}, ...
     "model", {identity, model, model}, ...
     "cfg", {overwriteCfg, overwriteCfg, blendCfg});
+
+% A one-layer acquisition has no z difference to display. For multi-layer data,
+% the fourth condition changes only the post-fusion z correction.
+if nLayers > 1 && ~strcmpi(cfg.zIllumination.method, "none")
+    steps(4) = struct( ...
+        "name", "04_xy_correction_fiji_blend_z_correction", ...
+        "label", "4. XY correction / Fiji blend / z correction", ...
+        "illumination", string(model.method), ...
+        "model", model, ...
+        "cfg", zBlendCfg);
+end
 end
 
 function plotOverview( ...
@@ -75,7 +97,7 @@ nChannels = numel(datasetIndex.channels);
 nLayers = datasetIndex.geometry.layersPerSection;
 nRows = nChannels * nLayers;
 fig = figure("Visible", "off", "Color", "w", ...
-    "Position", [100, 100, 1650, 420 * nRows]);
+    "Position", [100, 100, 550 * numel(steps), 420 * nRows]);
 tiledlayout(nRows, numel(steps), ...
     "Padding", "compact", "TileSpacing", "compact");
 
@@ -128,7 +150,7 @@ nChannels = numel(datasetIndex.channels);
 nLayers = datasetIndex.geometry.layersPerSection;
 nRows = nChannels * nLayers;
 fig = figure("Visible", "off", "Color", "w", ...
-    "Position", [100, 100, 1650, 420 * nRows]);
+    "Position", [100, 100, 550 * numel(steps), 420 * nRows]);
 tiledlayout(nRows, numel(steps), ...
     "Padding", "compact", "TileSpacing", "compact");
 
@@ -161,6 +183,62 @@ sgtitle(sprintf("Section %d: native-resolution central tile junction", ...
     sectionNumber));
 exportgraphics(fig, outputPath, "Resolution", 160);
 close(fig);
+end
+
+function plotZGainFields( ...
+        datasetIndex, sectionNumber, diagnostics, outputPath)
+% Show the reduced-resolution multiplicative field for each corrected layer.
+nLayers = datasetIndex.geometry.layersPerSection;
+referenceLayer = diagnostics(1).zIllumination.referenceLayer;
+correctedLayers = setdiff(1:nLayers, referenceLayer, "stable");
+nChannels = numel(datasetIndex.channels);
+
+fig = figure("Visible", "off", "Color", "w", ...
+    "Position", [100, 100, 650 * numel(correctedLayers), 500 * nChannels]);
+tiledlayout(nChannels, numel(correctedLayers), ...
+    "Padding", "compact", "TileSpacing", "compact");
+
+for c = 1:nChannels
+    channel = datasetIndex.channels(c);
+    row = [diagnostics.channelId] == channel.id;
+    if nnz(row) ~= 1
+        error("stpt:ReconstructionQC", ...
+            "Expected one z diagnostic for channel %d.", channel.id);
+    end
+    zDiagnostic = diagnostics(row).zIllumination;
+
+    for layer = correctedLayers
+        gain = zDiagnostic.gainFields{layer};
+        if isempty(gain)
+            error("stpt:ReconstructionQC", ...
+                "Missing z gain for channel %d, layer %d.", ...
+                channel.id, layer);
+        end
+        limits = centeredGainLimits(gain);
+        nexttile
+        imagesc(gain);
+        axis image off
+        clim(limits);
+        colormap(gca, turbo(256));
+        colorbar
+        title(sprintf("ch%d %s, layer %d / reference %d", ...
+            channel.id, channel.name, layer, referenceLayer));
+    end
+end
+
+sgtitle(sprintf("Section %d: StitchIt-style z-illumination gains", ...
+    sectionNumber));
+exportgraphics(fig, outputPath, "Resolution", 160);
+close(fig);
+end
+
+function limits = centeredGainLimits(gain)
+percentiles = prctile(double(gain(:)), [1, 99]);
+radius = max(abs(percentiles - 1));
+if radius == 0
+    radius = 0.01;
+end
+limits = [max(eps, 1 - radius), 1 + radius];
 end
 
 function path = findPlane(manifest, variant, sectionNumber, channelId, layer)
@@ -210,8 +288,20 @@ fprintf(fid, "Step 2: %s illumination; overwrite fusion\n", ...
     string(model.method));
 fprintf(fid, "Step 3: %s illumination; Fiji-style weighted fusion\n", ...
     string(model.method));
+if datasetIndex.geometry.layersPerSection > 1 && ...
+        ~strcmpi(cfg.zIllumination.method, "none")
+    fprintf(fid, "Step 4: %s illumination; Fiji-style weighted fusion; " + ...
+        "%s z illumination\n", string(model.method), ...
+        string(cfg.zIllumination.method));
+end
 fprintf(fid, "Fiji weight: ((dx+1)*(dy+1)+1)^alpha\n");
 fprintf(fid, "Fiji alpha: %.6g\n", cfg.fusion.blending.alpha);
+fprintf(fid, "Z reference layer: %d\n", ...
+    cfg.zIllumination.referenceLayer);
+fprintf(fid, "Z maximum estimation pixels: %.0f\n", ...
+    cfg.zIllumination.maxEstimationPixels);
+fprintf(fid, "Z filter-area fraction: %.6g\n", ...
+    cfg.zIllumination.filterAreaFraction);
 fprintf(fid, "Placement: recorded target step; normalized weighted sum\n");
 fprintf(fid, "All variants independently reconstructed: yes\n");
 fprintf(fid, "Canonical fusion TIFFs copied or reused: no\n");
