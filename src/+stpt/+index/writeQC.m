@@ -9,7 +9,7 @@ writeMetadataSummary(datasetIndex, cfg, ...
     fullfile(stageDir, "metadata_summary.txt"));
 
 % Emit a complete tile audit and two geometry checks for selected sections.
-for sectionNumber = cfg.qc.representativeSections
+for sectionNumber = cfg.sampling.qcSections
     sectionPosition = find([datasetIndex.sections.number] == sectionNumber, 1);
     if isempty(sectionPosition)
         error("stpt:QCSection", ...
@@ -130,7 +130,7 @@ for channel = datasetIndex.channels'
         channel.id, unique(inventory.(field)));
 end
 fprintf(fid, "Representative QC sections: %s\n", ...
-    mat2str(cfg.qc.representativeSections));
+    mat2str(cfg.sampling.qcSections));
 fprintf(fid, "Target/actual residual RMS x range: %.3f to %.3f um\n", ...
     min(inventory.targetResidualRmsXUm), ...
     max(inventory.targetResidualRmsXUm));

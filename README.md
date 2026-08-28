@@ -42,7 +42,7 @@ model contract, and `applyModel` applies the clear pointwise calculation
 channel for `tissueOtsu`; the optional StitchIt-reference method does not use
 tissue classification.
 
-Stage 3 uses the completed model to reconstruct the section at the center of the
+Stage 3 is currently a reconstruction pilot on the section at the center of the
 configured processing range. It streams native tiles, applies crop and
 illumination correction in raw orientation, rotates each corrected tile 90
 degrees clockwise to match the target-stage axes, and places retained
@@ -54,18 +54,19 @@ uint16 TIFFs with lossless LZW compression; no corrected tile intermediates are
 made.
 
 The pilot and future production reconstruction share the same geometry, plane
-fusion, writer, output paths, and manifest. The pilot differs only by supplying
-one derived center section and requesting detailed QC. Its completed planes can
-therefore be reused when production expands to all processing sections.
+fusion, TIFF writer, and manifest schema. They intentionally use independent
+output trees: the pilot is a small validation product, not partial production
+output. Production can therefore begin from one unambiguous clean stage after
+the pilot settings have been accepted.
 
 The optional `cfg.qc.comparisons.reconstructionSteps` flag independently
 reconstructs three versions of every pilot channel/layer plane: no correction
 with overwrite, XY correction with overwrite, and XY correction with Fiji-style
 blending. All three use the same crop, model-application interface, tile
 orientation, plane processor, and lossless writer. Full-resolution TIFFs, a
-combined manifest and input signature, a complete-field overview, and
+combined manifest, a complete-field overview, and
 native-resolution junctions are kept together under
-`03_fusion/qc/comparisons/reconstruction_steps`.
+`03_reconstruction/pilot/qc/comparisons/reconstruction_steps`.
 Comparison variants are never copied from or linked to canonical output.
 
 Fiji blending follows OpenSTP's `fusionMethod=3`: each corrected tile is
@@ -89,9 +90,10 @@ Computation and visualization have independent regular samples. With
 `illuminationEveryNSections = 10`, Stage 2 fitting uses sections
 `1, 11, ..., 291`; with `qcEveryNSections = 50`, Stage 1/2 plots use
 `1, 51, 101, 151, 201, 251`. Final sections are not appended automatically.
-The fusion pilot section is `round((sectionStart + sectionStop)/2)`, which is
+The reconstruction pilot section is
+`round((sectionStart + sectionStop)/2)`, which is
 section 151 for the default 1:300 range. The same every-50 sequence is reserved
-for compact QC during future production fusion.
+for compact QC during future production reconstruction.
 
 The planned metadata count remains `cfg.acquisition.sectionCount`. To process
 only a complete prefix or subset, override the reconstruction range explicitly:
@@ -106,12 +108,14 @@ runStptReconstruction(cfg);
 Sections outside this range are ignored. Every requested section must still be
 complete and present in every configured channel.
 
-Completed stage directories are protected from accidental replacement. To
-intentionally replace the requested terminal stage, set
-`cfg.execution.overwrite = true`; its old derived directory is removed before the
-new run starts. Completed prerequisite stages are loaded without modification.
-When the tissue-Otsu model is requested and its selection checkpoint is absent,
-the master runner creates that prerequisite before fitting the model.
+Completed scientific stages may be loaded as prerequisites. Incomplete stage
+directories are disposable and are removed before that stage is rerun from the
+beginning; there is no plane-level resume or recovery state. A completed
+requested stage remains protected from accidental replacement. Set
+`cfg.execution.overwrite = true` to remove and intentionally rerun that complete
+terminal stage. When the tissue-Otsu model is requested and its completed
+selection checkpoint is absent, the master runner builds that prerequisite
+first.
 
 To stop after Stage 1:
 
@@ -121,12 +125,13 @@ cfg.execution.stopAfter = "index";
 runStptReconstruction(cfg);
 ```
 
-The experiment config currently stops after the Stage 3 fusion pilot. Tissue
+The experiment config currently stops after the Stage 3 reconstruction pilot.
+The terminal-stage name is `reconstructionPilot`. Tissue
 selection is stored under `02_illumination/tissue_otsu/01_selection`; the fitted
-model is stored under `02_illumination/tissue_otsu/02_model`; canonical fused
-planes and pilot QC are stored under `03_fusion`. Neither Stage 2 substep writes
-corrected TIFFs. The optional StitchIt-reference model uses the parallel path
-`02_illumination/stitchit_reference/02_model`.
+model is stored under `02_illumination/tissue_otsu/02_model`; canonical pilot
+planes and QC are stored under `03_reconstruction/pilot`. Neither Stage 2
+substep writes corrected TIFFs. The optional StitchIt-reference model uses the
+parallel path `02_illumination/stitchit_reference/02_model`.
 
 ## Code organization
 
@@ -141,6 +146,7 @@ The package is divided by responsibility:
 | `stpt.illumination.tissueOtsu` | Select tissue-bearing tiles with green-channel log-Otsu and fit direct pooled templates. |
 | `stpt.preprocessing` | Apply the explicit native-TIFF-to-target-grid tile orientation after illumination correction. |
 | `stpt.fusion` | Compute target-grid geometry, prepare native tiles, dispatch overwrite or Fiji-style fusion, write lossless TIFFs, and generate fusion QC. |
+| `stpt.reconstruction` | Record stage-level reconstruction inputs and provenance. |
 
 The master runner owns stage order and derived-output directories; scientific
 algorithms do not rename or reorganize raw files.
@@ -181,7 +187,7 @@ Shared interface functions contain no StitchIt estimation logic:
 | `stpt.illumination.validateModel` | Require complete channel/layer coverage and finite positive cropped gains. |
 | `stpt.illumination.applyModel` | Crop, subtract the selected offset, and multiply by the model gain; return `single` without hidden clipping or casting. |
 | `stpt.illumination.identityModel` | Preserve the model contract while replacing every offset and gain with `D=0` and `G=1` for crop-only comparisons. |
-| `stpt.fusion.processPlanes` | Apply one supplied model and fusion configuration, then reconstruct requested planes into an explicit output root and manifest. |
+| `stpt.fusion.processPlanes` | Apply one supplied model and fusion configuration, then freshly reconstruct every requested plane into a new output root and return its manifest. |
 | `stpt.fusion.writeReconstructionStepComparison` | Independently reconstruct the ordered correction/blending variants and assemble matched visual QC. |
 
 In `pool` mode, one correction is stored identically in both slots of the common
@@ -202,6 +208,7 @@ step. Fiji blending is the canonical fusion mode; reverse-order overwrite is
 retained only for the two controlled pilot comparisons. Production downsampling
 will remain a separate final stage.
 
-Planned extensions are production-wide fusion with compact every-50-section QC,
-z illumination correction on the fused volume, final downsampling, and
-plane-level parallelism.
+Planned extensions are z-illumination validation, a production-wide
+reconstruction whose final full-resolution TIFFs include the accepted z
+correction when needed, separate final downsampling, and plane-level
+parallelism.

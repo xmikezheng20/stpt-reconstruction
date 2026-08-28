@@ -52,7 +52,8 @@ cfg.processing.sectionStart = 1;
 cfg.processing.sectionStop = cfg.acquisition.sectionCount;
 
 % Illumination fitting uses a denser volume sample than diagnostic plots and
-% the later fusion pilot. Final sections are not appended to either sequence.
+% the later reconstruction pilot. Final sections are not appended to either
+% sequence.
 cfg.sampling.illuminationEveryNSections = 10;
 cfg.sampling.qcEveryNSections = 50;
 
@@ -75,8 +76,8 @@ cfg.illumination.stitchitReference.thresholdScale = 1.01;
 cfg.illumination.stitchitReference.maxRejectedFraction = 0.85;
 cfg.illumination.stitchitReference.minimumTilesPerParity = 2;
 cfg.illumination.stitchitReference.acrossSectionTrimPercent = 10;
-% Fusion uses the same scientific and file-writing settings in pilot and
-% production. The pilot section itself is derived from the processing range.
+% Reconstruction uses the same scientific and file-writing settings in pilot
+% and production. The pilot section is derived from the processing range.
 cfg.fusion.mode = "fijiBlend";
 cfg.fusion.compression = "lzw";
 cfg.fusion.qcPreviewScale = 0.10;
@@ -88,7 +89,7 @@ cfg.fusion.blending.alpha = 1.5;
 cfg.qc.comparisons.reconstructionSteps = true;
 
 % Development checkpoint: reconstruct the center section in every configured
-% channel and optical layer, then write compact fusion QC.
-cfg.execution.stopAfter = "fusionPilot";
+% channel and optical layer, then write compact reconstruction QC.
+cfg.execution.stopAfter = "reconstructionPilot";
 cfg.execution.overwrite = false;
 end

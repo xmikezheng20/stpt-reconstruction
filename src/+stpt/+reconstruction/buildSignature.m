@@ -1,19 +1,20 @@
-function signature = buildReconstructionStepSignature( ...
-        datasetIndex, model, cfg, sectionNumber)
-%BUILDRECONSTRUCTIONSTEPSIGNATURE Record inputs to the three-step pilot QC.
+function signature = buildSignature(datasetIndex, model, cfg, sections)
+%BUILDSIGNATURE Record the scientific inputs to a reconstruction stage.
 
 signature = struct();
 signature.schemaVersion = 1;
-signature.sectionNumber = sectionNumber;
-signature.processingSections = datasetIndex.processingSections;
+signature.experimentId = string(cfg.experiment.id);
+signature.rawRoot = string(datasetIndex.rawRoot);
+signature.configuredProcessingSections = datasetIndex.processingSections;
+signature.reconstructionSections = sections(:)';
 signature.channelIds = [datasetIndex.channels.id];
 signature.channelNames = string({datasetIndex.channels.name});
-signature.layersPerSection = datasetIndex.geometry.layersPerSection;
 signature.gridSize = datasetIndex.geometry.gridSize;
 signature.tileSizePixels = datasetIndex.geometry.tileSizePixels;
 signature.retainedTileSizePixels = ...
     datasetIndex.geometry.retainedTileSizePixels;
 signature.targetStepPixels = datasetIndex.geometry.targetStepPixels;
+signature.canvasSizePixels = datasetIndex.geometry.nominalCanvasSizePixels;
 signature.cropPixels = datasetIndex.geometry.cropPixels;
 signature.tileOrientation = string(cfg.preprocessing.tileOrientation);
 signature.modelSchemaVersion = model.schemaVersion;
@@ -21,13 +22,12 @@ signature.modelCreated = string(model.created);
 signature.modelMethod = string(model.method);
 signature.modelRowMode = string(model.rowMode);
 signature.modelTrainingSections = model.trainingSections;
-signature.variants = [ ...
-    "01_no_correction_no_blend", ...
-    "02_xy_correction_no_blend", ...
-    "03_xy_correction_fiji_blend"];
-signature.blendingMethod = string(cfg.fusion.blending.method);
-signature.blendingAlpha = cfg.fusion.blending.alpha;
+signature.fusionMode = string(cfg.fusion.mode);
+if strcmpi(cfg.fusion.mode, "fijiBlend")
+    signature.blendingMethod = string(cfg.fusion.blending.method);
+    signature.blendingAlpha = cfg.fusion.blending.alpha;
+end
 signature.outputClass = "uint16";
 signature.compression = lower(string(cfg.fusion.compression));
-signature.qcPreviewScale = cfg.fusion.qcPreviewScale;
+signature.finalOrientation = "none";
 end

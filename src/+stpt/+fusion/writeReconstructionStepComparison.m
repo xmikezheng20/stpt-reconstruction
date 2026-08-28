@@ -8,34 +8,8 @@ function comparisonManifest = writeReconstructionStepComparison( ...
 
 comparisonDir = string(fullfile(stageDir, "qc", "comparisons", ...
     "reconstruction_steps"));
-completionPath = fullfile(comparisonDir, "comparison_complete.txt");
 combinedManifestPath = fullfile(comparisonDir, "comparison_manifest.csv");
-signaturePath = fullfile(comparisonDir, "comparison_signature.mat");
-signature = stpt.fusion.buildReconstructionStepSignature( ...
-    datasetIndex, model, cfg, sectionNumber);
-
-if ~isfolder(comparisonDir)
-    mkdir(comparisonDir);
-    save(signaturePath, "signature");
-elseif ~isfile(signaturePath)
-    error("stpt:FusionComparisonSignature", ...
-        "Existing reconstruction comparison has no signature: %s", ...
-        comparisonDir);
-else
-    saved = load(signaturePath, "signature");
-    if ~isequaln(saved.signature, signature)
-        error("stpt:FusionComparisonSignature", ...
-            "Existing reconstruction comparison used different inputs.");
-    end
-end
-
-if isfile(completionPath) && isfile(combinedManifestPath)
-    comparisonManifest = readtable( ...
-        combinedManifestPath, "TextType", "string");
-    fprintf("Reconstruction-step comparison already complete: %s\n", ...
-        comparisonDir);
-    return
-end
+mkdir(comparisonDir);
 
 fprintf("\nReconstruction-step comparison: section %d, all channels/layers.\n", ...
     sectionNumber);
@@ -49,8 +23,7 @@ for stepNumber = 1:numel(steps)
     step = steps(stepNumber);
     stepDir = string(fullfile(comparisonDir, step.name));
     manifest = stpt.fusion.processPlanes( ...
-        datasetIndex, step.model, step.cfg, sectionNumber, stepDir, ...
-        fullfile(stepDir, "fusion_manifest.csv"));
+        datasetIndex, step.model, step.cfg, sectionNumber, stepDir);
     manifest.stepNumber = repmat(stepNumber, height(manifest), 1);
     manifest.variant = repmat(step.name, height(manifest), 1);
     manifest.illumination = repmat(step.illumination, height(manifest), 1);
@@ -59,7 +32,7 @@ for stepNumber = 1:numel(steps)
 end
 
 comparisonManifest = vertcat(manifests{:});
-writetable(comparisonManifest, combinedManifestPath);
+stpt.writeTableAtomic(comparisonManifest, combinedManifestPath);
 
 plotOverview(datasetIndex, cfg, sectionNumber, comparisonManifest, steps, ...
     fullfile(comparisonDir, "reconstruction_steps_all_planes.png"));
@@ -68,8 +41,6 @@ plotCentralJunctions( ...
     fullfile(comparisonDir, "reconstruction_steps_central_junctions.png"));
 writeSummary(datasetIndex, model, cfg, sectionNumber, comparisonManifest, ...
     fullfile(comparisonDir, "comparison_summary.txt"));
-writelines("Reconstruction-step comparison completed " + ...
-    string(datetime("now")), completionPath);
 
 fprintf("Reconstruction-step comparison complete: %d full-resolution planes.\n", ...
     height(comparisonManifest));

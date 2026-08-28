@@ -1,9 +1,17 @@
 function manifest = processPlanes( ...
-        datasetIndex, model, cfg, sections, planeRoot, manifestPath)
-%PROCESSPLANES Reconstruct fused planes for any section list and output root.
+        datasetIndex, model, cfg, sections, planeRoot)
+%PROCESSPLANES Reconstruct every requested plane into a new output tree.
 %
-% Canonical production and QC alternatives call this same interface. Their
-% models and output roots differ; tile processing, fusion, and writing do not.
+% Pilot, production, and QC alternatives call this same fresh-run interface.
+% Stage lifecycle is owned by the master runner; this function never resumes or
+% reuses an existing plane.
+
+if isfolder(planeRoot)
+    error("stpt:FusionOutput", ...
+        "Plane output root already exists; start the stage clean: %s", ...
+        planeRoot);
+end
+mkdir(planeRoot);
 
 sections = sections(:)';
 nLayers = datasetIndex.geometry.layersPerSection;
@@ -11,11 +19,6 @@ nChannels = numel(datasetIndex.channels);
 nPlanes = numel(sections) * nLayers * nChannels;
 rows = repmat(emptyManifestRow(), nPlanes, 1);
 rowNumber = 0;
-if isfile(manifestPath)
-    previousManifest = readtable(manifestPath, "TextType", "string");
-else
-    previousManifest = table();
-end
 
 fprintf("Fusion (%s): %d sections x %d layers x %d channels = %d planes.\n", ...
     cfg.fusion.mode, numel(sections), nLayers, nChannels, nPlanes);
@@ -26,9 +29,7 @@ for sectionNumber = sections
         channel = datasetIndex.channels(c);
         channelDir = fullfile(planeRoot, ...
             sprintf("ch%02d_%s", channel.id, channel.name));
-        if ~isfolder(channelDir)
-            mkdir(channelDir);
-        end
+        mkdir(channelDir);
 
         for layer = 1:nLayers
             rowNumber = rowNumber + 1;
@@ -38,15 +39,6 @@ for sectionNumber = sections
                 rowNumber, nPlanes, sectionNumber, layer, ...
                 channel.id, channel.name);
 
-            if isfile(outputPath)
-                validateExistingPlane(outputPath, datasetIndex.geometry);
-                rows(rowNumber) = manifestRowForExisting( ...
-                    sectionNumber, layer, channel, outputPath, ...
-                    previousManifest);
-                fprintf("    valid output exists; reusing it.\n");
-                continue
-            end
-
             planeStarted = tic;
             [stitched, audit] = stpt.fusion.fusePlane( ...
                 datasetIndex, model, cfg, sectionNumber, layer, channel.id);
@@ -55,8 +47,9 @@ for sectionNumber = sections
                 stitched, outputPath, cfg.fusion.compression);
             writeSeconds = toc(writeStarted);
             totalSeconds = toc(planeStarted);
+
             fileInfo = dir(outputPath);
-            rows(rowNumber) = manifestRowForNew( ...
+            rows(rowNumber) = buildManifestRow( ...
                 audit, channel, outputPath, fileInfo.bytes, cfg, ...
                 writeSeconds, totalSeconds);
             fprintf("    fused %.1f s; wrote %.1f MiB LZW TIFF %.1f s.\n", ...
@@ -66,23 +59,12 @@ for sectionNumber = sections
 end
 
 manifest = struct2table(rows);
-writetable(manifest, manifestPath);
-end
-
-function validateExistingPlane(path, geometry)
-% Existing filenames are trusted only after their basic image contract passes.
-info = imfinfo(path);
-expected = geometry.nominalCanvasSizePixels;
-if numel(info) ~= 1 || info.Width ~= expected(1) || ...
-        info.Height ~= expected(2) || info.BitDepth ~= 16
-    error("stpt:FusionOutput", ...
-        "Existing fused plane has the wrong image format: %s", path);
-end
+validateManifest(manifest, nPlanes);
 end
 
 function row = emptyManifestRow()
 row = struct("sectionNumber", nan, "layer", nan, "channelId", nan, ...
-    "channelName", "", "filePath", "", "status", "", ...
+    "channelName", "", "filePath", "", ...
     "widthPixels", nan, "heightPixels", nan, "compression", "lzw", ...
     "outputBytes", nan, "fusionSeconds", nan, "writeSeconds", nan, ...
     "totalSeconds", nan, ...
@@ -90,15 +72,15 @@ row = struct("sectionNumber", nan, "layer", nan, "channelId", nan, ...
     "clippedLowPixels", nan, "clippedHighPixels", nan);
 end
 
-function row = manifestRowForNew( ...
+function row = buildManifestRow( ...
         audit, channel, path, outputBytes, cfg, writeSeconds, totalSeconds)
+% Record the image contract and scientific audit immediately after writing.
 row = emptyManifestRow();
 row.sectionNumber = audit.sectionNumber;
 row.layer = audit.layer;
 row.channelId = audit.channelId;
 row.channelName = string(channel.name);
 row.filePath = string(path);
-row.status = "written";
 info = imfinfo(path);
 row.widthPixels = info.Width;
 row.heightPixels = info.Height;
@@ -113,32 +95,13 @@ row.clippedLowPixels = audit.clippedLowPixels;
 row.clippedHighPixels = audit.clippedHighPixels;
 end
 
-function row = manifestRowForExisting( ...
-        sectionNumber, layer, channel, path, previousManifest)
-% Preserve the original scientific audit when a completed plane is reused.
-row = emptyManifestRow();
-fields = string(fieldnames(row));
-if ~isempty(previousManifest) && all(ismember( ...
-        fields, string(previousManifest.Properties.VariableNames)))
-    previous = previousManifest.sectionNumber == sectionNumber & ...
-        previousManifest.layer == layer & ...
-        previousManifest.channelId == channel.id;
-    if nnz(previous) == 1
-        savedRow = table2struct(previousManifest(previous, :));
-        for field = fields'
-            row.(field) = savedRow.(field);
-        end
-    end
+function validateManifest(manifest, expectedPlanes)
+% A successful call must publish exactly one existing file per requested plane.
+keyNames = ["sectionNumber", "layer", "channelId"];
+keys = unique(manifest(:, keyNames), "rows");
+if height(manifest) ~= expectedPlanes || height(keys) ~= expectedPlanes || ...
+        ~all(isfile(manifest.filePath))
+    error("stpt:FusionOutput", ...
+        "Reconstruction did not produce one file for every requested plane.");
 end
-row.sectionNumber = sectionNumber;
-row.layer = layer;
-row.channelId = channel.id;
-row.channelName = string(channel.name);
-row.filePath = string(path);
-row.status = "reused";
-info = imfinfo(path);
-fileInfo = dir(path);
-row.widthPixels = info.Width;
-row.heightPixels = info.Height;
-row.outputBytes = fileInfo.bytes;
 end

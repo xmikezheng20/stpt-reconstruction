@@ -50,7 +50,7 @@ plotChannelOverlay(datasetIndex, cfg, sectionNumber, previews, displayLimits, ..
 plotChessboard(datasetIndex, model, cfg, sectionNumber, displayLimits, ...
     fullfile(qcDir, "center_section_green_chessboard.png"));
 writeSummary(datasetIndex, cfg, sectionNumber, manifest, ...
-    fullfile(stageDir, "fusion_summary.txt"));
+    fullfile(stageDir, "reconstruction_summary.txt"));
 end
 
 function plotChannelLayers(datasetIndex, cfg, sectionNumber, previews, ...
@@ -217,7 +217,7 @@ fid = fopen(outputPath, "w");
 if fid < 0
     error("stpt:WriteOutput", "Could not write %s.", outputPath);
 end
-fprintf(fid, "STPT center-section fusion pilot completed\n");
+fprintf(fid, "STPT center-section reconstruction pilot completed\n");
 fprintf(fid, "Pilot section: %d (derived from processing range %d:%d)\n", ...
     sectionNumber, cfg.processing.sectionStart, cfg.processing.sectionStop);
 fprintf(fid, "Channels: %s\n", mat2str([datasetIndex.channels.id]));

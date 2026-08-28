@@ -83,13 +83,15 @@ if targetStage == "illuminationmodel"
     return
 end
 
-% Stage 3 uses the production fusion core on one derived center section. Its
-% canonical planes can be reused when a later production run expands the list.
-[fusionManifest, fusionDir, comparisonManifest] = runFusionPilotStage( ...
-    datasetIndex, illuminationModel, cfg, repoRoot, ...
-    cfg.execution.overwrite);
-result.fusionManifest = fusionManifest;
-result.fusionDirectory = fusionDir;
+% Stage 3 runs the shared reconstruction core on one derived center section.
+% The pilot is an independent, disposable validation product; production will
+% use a separate output tree.
+[reconstructionManifest, reconstructionDir, comparisonManifest] = ...
+    runReconstructionPilotStage( ...
+        datasetIndex, illuminationModel, cfg, repoRoot, ...
+        cfg.execution.overwrite);
+result.reconstructionManifest = reconstructionManifest;
+result.reconstructionDirectory = reconstructionDir;
 if ~isempty(comparisonManifest)
     result.reconstructionStepComparisonManifest = comparisonManifest;
 end
@@ -136,21 +138,12 @@ datasetIndex = saved.datasetIndex;
 
 saved = load(configPath, "cfg");
 indexConfig = saved.cfg;
-if isfield(indexConfig, "sampling") && ...
-        isfield(indexConfig.sampling, "qcSections")
-    indexedQcSections = indexConfig.sampling.qcSections;
-elseif isfield(indexConfig, "sampling") && ...
-        isfield(indexConfig.sampling, "sections")
-    % Accept output from the earlier single-interval configuration.
-    indexedQcSections = indexConfig.sampling.sections;
-elseif isfield(indexConfig, "qc") && ...
-        isfield(indexConfig.qc, "representativeSections")
-    % Accept Stage 1 output from the earlier explicit-list configuration.
-    indexedQcSections = indexConfig.qc.representativeSections;
-else
+if ~isfield(indexConfig, "sampling") || ...
+        ~isfield(indexConfig.sampling, "qcSections")
     error("stpt:StaleIndex", ...
         "The completed index does not record its representative QC sections.");
 end
+indexedQcSections = indexConfig.sampling.qcSections;
 if ~isequal(indexedQcSections(:)', cfg.sampling.qcSections(:)')
     error("stpt:StaleIndex", ...
         "Stage 1 QC was generated for different representative sections. " + ...
@@ -164,7 +157,7 @@ stageDir = stpt.prepareStageDirectory(cfg.paths.outputRoot, "01_index", overwrit
 diary(fullfile(stageDir, "stage.log"));
 diaryCleanup = onCleanup(@() diary("off"));
 provenance = stpt.captureProvenance(repoRoot);
-logRunHeader(cfg, provenance, "Stage 1/2: native-data index", stageDir);
+logRunHeader(cfg, provenance, "Stage 1: native-data index", stageDir);
 
 save(fullfile(stageDir, "resolved_config.mat"), "cfg", "provenance");
 stpt.writeProvenance(provenance, fullfile(stageDir, "provenance.txt"));
@@ -224,30 +217,32 @@ switch lower(string(cfg.illumination.method))
 end
 end
 
-function [manifest, stageDir, comparisonManifest] = runFusionPilotStage( ...
+function [manifest, stageDir, comparisonManifest] = ...
+        runReconstructionPilotStage( ...
         datasetIndex, model, cfg, repoRoot, overwrite)
-% Run the shared fusion engine on the derived center section and write full QC.
-signature = stpt.fusion.buildSignature(datasetIndex, model, cfg);
-stageDir = string(fullfile(cfg.paths.outputRoot, "03_fusion"));
-completionPath = fullfile(stageDir, "pilot_complete.txt");
-stageDir = stpt.fusion.prepareOutputDirectory( ...
-    cfg.paths.outputRoot, signature, overwrite);
+% Reconstruct the derived center section in a clean, independent pilot tree.
+stageName = fullfile("03_reconstruction", "pilot");
+stageDir = stpt.prepareStageDirectory( ...
+    cfg.paths.outputRoot, stageName, overwrite);
 
 diary(fullfile(stageDir, "stage.log"));
 diaryCleanup = onCleanup(@() diary("off"));
 provenance = stpt.captureProvenance(repoRoot);
-logRunHeader(cfg, provenance, "Stage 3: center-section fusion pilot", stageDir);
+logRunHeader(cfg, provenance, "Stage 3: reconstruction pilot", stageDir);
 
 save(fullfile(stageDir, "resolved_config.mat"), "cfg", "provenance");
 stpt.writeProvenance(provenance, fullfile(stageDir, "provenance.txt"));
 
-sectionNumber = cfg.sampling.fusionPilotSection;
+sectionNumber = cfg.sampling.reconstructionPilotSection;
+signature = stpt.reconstruction.buildSignature( ...
+    datasetIndex, model, cfg, sectionNumber);
+save(fullfile(stageDir, "reconstruction_signature.mat"), "signature");
 geometry = stpt.fusion.computeGeometry(datasetIndex, sectionNumber);
 writetable(geometry.placements, fullfile(stageDir, "tile_placement.csv"));
 canonicalRoot = string(fullfile(stageDir, "stitched"));
 manifest = stpt.fusion.processPlanes( ...
-    datasetIndex, model, cfg, sectionNumber, canonicalRoot, ...
-    fullfile(stageDir, "fusion_manifest.csv"));
+    datasetIndex, model, cfg, sectionNumber, canonicalRoot);
+stpt.writeTableAtomic(manifest, fullfile(stageDir, "manifest.csv"));
 stpt.fusion.writePilotQC( ...
     datasetIndex, model, cfg, sectionNumber, manifest, stageDir);
 
@@ -259,9 +254,9 @@ if cfg.qc.comparisons.reconstructionSteps
         datasetIndex, model, cfg, sectionNumber, stageDir);
 end
 
-writelines("Fusion pilot completed " + string(datetime("now")), ...
-    completionPath);
-fprintf("Stage 3 pilot complete: section %d, %d fused planes.\n", ...
+writelines("Reconstruction pilot completed " + string(datetime("now")), ...
+    fullfile(stageDir, "stage_complete.txt"));
+fprintf("Stage 3 pilot complete: section %d, %d reconstructed planes.\n", ...
     sectionNumber, height(manifest));
 fprintf("Outputs: %s\n\n", stageDir);
 end

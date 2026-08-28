@@ -108,8 +108,8 @@ end
 cfg.sampling.illuminationSections = ...
     sectionStart:illuminationStride:sectionStop;
 cfg.sampling.qcSections = sectionStart:qcStride:sectionStop;
-cfg.sampling.fusionPilotSection = round((sectionStart + sectionStop) / 2);
-cfg.qc.representativeSections = cfg.sampling.qcSections;
+cfg.sampling.reconstructionPilotSection = ...
+    round((sectionStart + sectionStop) / 2);
 
 % Target-position placement is the deliberate scope of this reconstruction.
 if ~strcmpi(cfg.stitching.positionSource, "target")
@@ -118,7 +118,7 @@ if ~strcmpi(cfg.stitching.positionSource, "target")
 end
 
 validStops = ["index", "illuminationSelection", "illuminationModel", ...
-    "fusionPilot"];
+    "reconstructionPilot"];
 if ~any(strcmpi(cfg.execution.stopAfter, validStops))
     error("stpt:StopAfter", "cfg.execution.stopAfter must be %s.", ...
         strjoin(validStops, " or "));
@@ -134,8 +134,8 @@ if isfield(cfg, "illumination")
     cfg.illumination.qcSections = cfg.sampling.qcSections;
 end
 
-% Fusion policy is explicit and independent of target-grid placement.
-if strcmpi(cfg.execution.stopAfter, "fusionPilot")
+% Reconstruction policy is explicit and independent of target-grid placement.
+if strcmpi(cfg.execution.stopAfter, "reconstructionPilot")
     if ~isfield(cfg, "fusion")
         error("stpt:MissingConfig", "Stage 3 requires cfg.fusion.");
     end
