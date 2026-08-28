@@ -5,7 +5,6 @@ function model = buildModelFromTemplates(templates, datasetIndex, cfg)
 % zero offset, and model layout are numerically identical.
 
 model = struct();
-model.schemaVersion = 1;
 model.created = string(datetime("now"));
 model.method = string(cfg.illumination.method);
 model.rowMode = lower(string(cfg.illumination.rowMode));

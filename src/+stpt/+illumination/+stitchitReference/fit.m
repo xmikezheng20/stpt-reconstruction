@@ -86,7 +86,6 @@ writetable(selectionSummary, fullfile(stageDir, "selection_summary.csv"));
 writetable(templateSummary, fullfile(stageDir, "template_summary.csv"));
 
 audit = struct();
-audit.schemaVersion = 1;
 audit.created = string(datetime("now"));
 audit.method = string(cfg.illumination.method);
 audit.trainingSections = sections;

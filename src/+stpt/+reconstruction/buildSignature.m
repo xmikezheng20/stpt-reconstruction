@@ -2,7 +2,6 @@ function signature = buildSignature(datasetIndex, model, cfg, sections)
 %BUILDSIGNATURE Record the scientific inputs to a reconstruction stage.
 
 signature = struct();
-signature.schemaVersion = 1;
 signature.experimentId = string(cfg.experiment.id);
 signature.rawRoot = string(datasetIndex.rawRoot);
 signature.configuredProcessingSections = datasetIndex.processingSections;
@@ -17,7 +16,6 @@ signature.targetStepPixels = datasetIndex.geometry.targetStepPixels;
 signature.canvasSizePixels = datasetIndex.geometry.nominalCanvasSizePixels;
 signature.cropPixels = datasetIndex.geometry.cropPixels;
 signature.tileOrientation = string(cfg.preprocessing.tileOrientation);
-signature.modelSchemaVersion = model.schemaVersion;
 signature.modelCreated = string(model.created);
 signature.modelMethod = string(model.method);
 signature.modelRowMode = string(model.rowMode);

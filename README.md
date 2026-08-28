@@ -119,7 +119,9 @@ requested stage remains protected from accidental replacement. Set
 `cfg.execution.overwrite = true` to remove and intentionally rerun that complete
 terminal stage. When the tissue-Otsu model is requested and its completed
 selection checkpoint is absent, the master runner builds that prerequisite
-first.
+first. A completed illumination model is reused only when its training sample,
+QC sample, crop, row mode, and selected estimator parameters match the current
+configuration.
 
 To stop after Stage 1:
 

@@ -190,7 +190,6 @@ geometry.nominalCanvasSizePixels = retainedSize + ...
 % Assemble a self-contained index that references, but never contains or alters,
 % the raw image pixels.
 datasetIndex = struct();
-datasetIndex.schemaVersion = 1;
 datasetIndex.created = string(datetime("now"));
 datasetIndex.rawRoot = cfg.paths.rawRoot;
 datasetIndex.processingSections = processingSections';

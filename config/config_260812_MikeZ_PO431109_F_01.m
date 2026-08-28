@@ -85,7 +85,8 @@ cfg.fusion.blending.method = "fijiDistance";
 cfg.fusion.blending.alpha = 1.5;
 
 % Match deeper optical layers to the broadly smoothed first layer after fusion.
-% These are the defaults in StitchIt's full-resolution z-correction function.
+% These are StitchIt's defaults. For this 1 um/pixel mosaic, 0.01 gives a
+% Gaussian sigma of about 1.26 mm; maxEstimationPixels controls computation.
 cfg.zIllumination.method = "stitchitSmoothRatio";
 cfg.zIllumination.referenceLayer = 1;
 cfg.zIllumination.maxEstimationPixels = 1.5e6;

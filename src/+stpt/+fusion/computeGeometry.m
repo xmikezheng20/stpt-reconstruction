@@ -41,7 +41,6 @@ if max(placements.xEnd) ~= canvasSize(1) || ...
 end
 
 geometry = struct();
-geometry.schemaVersion = 1;
 geometry.sectionNumber = sectionNumber;
 geometry.tileSizePixels = tileSize;
 geometry.targetStepPixels = step;

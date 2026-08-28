@@ -3,9 +3,6 @@ function writeTableAtomic(value, outputPath)
 
 [folder, stem, extension] = fileparts(outputPath);
 partialPath = fullfile(folder, stem + ".partial" + extension);
-if isfile(partialPath)
-    delete(partialPath);
-end
 writetable(value, partialPath);
 movefile(partialPath, outputPath);
 end

@@ -51,7 +51,6 @@ thresholdRawEquivalent = expm1(thresholdLog);
 tiles.selectedForIllumination = tiles.logCroppedMean > thresholdLog;
 
 selection = struct();
-selection.schemaVersion = 1;
 selection.created = string(datetime("now"));
 selection.method = "tissueOtsu";
 selection.referenceChannel = channelId;

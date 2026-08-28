@@ -221,12 +221,12 @@ for c = 1:nChannels
         clim(limits);
         colormap(gca, turbo(256));
         colorbar
-        title(sprintf("ch%d %s, layer %d / reference %d", ...
-            channel.id, channel.name, layer, referenceLayer));
+        title(sprintf("ch%d %s, gain on layer %d\nreference %d / layer %d", ...
+            channel.id, channel.name, layer, referenceLayer, layer));
     end
 end
 
-sgtitle(sprintf("Section %d: StitchIt-style z-illumination gains", ...
+sgtitle(sprintf("Section %d: StitchIt-style reference/target z gains", ...
     sectionNumber));
 exportgraphics(fig, outputPath, "Resolution", 160);
 close(fig);
