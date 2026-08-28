@@ -13,7 +13,7 @@ addpath(fullfile(repoRoot, "src"));
 cfg = stpt.validateConfig(cfg);
 targetStage = lower(string(cfg.execution.stopAfter));
 
-% Stage 1 is either the requested target or a prerequisite for Stage 2.
+% Stage 1 is either the requested target or a prerequisite for later stages.
 indexDir = string(fullfile(cfg.paths.outputRoot, "01_index"));
 indexComplete = isfile(fullfile(indexDir, "stage_complete.txt"));
 if targetStage == "index" || ~indexComplete
@@ -60,13 +60,39 @@ if strcmpi(cfg.illumination.method, "tissueOtsu")
     result.illuminationSelectionDirectory = selectionDir;
 end
 
-% Stage 2 fits one configured method through the shared illumination interface.
-[illuminationModel, illuminationAudit, illuminationDir] = ...
-    runIlluminationStage( ...
-    datasetIndex, cfg, repoRoot, cfg.execution.overwrite);
+% Stage 2 is regenerated only when it is the requested terminal stage or is
+% absent. Stage 3 otherwise loads and validates the completed model.
+illuminationDir = string(fullfile(cfg.paths.outputRoot, ...
+    illuminationStageName(cfg)));
+illuminationComplete = isfile(fullfile(illuminationDir, "stage_complete.txt"));
+if targetStage == "illuminationmodel" || ~illuminationComplete
+    [illuminationModel, illuminationAudit, illuminationDir] = ...
+        runIlluminationStage(datasetIndex, cfg, repoRoot, ...
+        targetStage == "illuminationmodel" && cfg.execution.overwrite);
+else
+    fprintf("Loading completed Stage 2 model: %s\n", illuminationDir);
+    [illuminationModel, illuminationAudit] = ...
+        stpt.illumination.loadCompletedModel( ...
+        illuminationDir, datasetIndex, cfg);
+end
 result.illuminationModel = illuminationModel;
 result.illuminationAudit = illuminationAudit;
 result.illuminationDirectory = illuminationDir;
+
+if targetStage == "illuminationmodel"
+    return
+end
+
+% Stage 3 uses the production fusion core on one derived center section. Its
+% canonical planes can be reused when a later production run expands the list.
+[fusionManifest, fusionDir, comparisonManifest] = runFusionPilotStage( ...
+    datasetIndex, illuminationModel, cfg, repoRoot, ...
+    cfg.execution.overwrite);
+result.fusionManifest = fusionManifest;
+result.fusionDirectory = fusionDir;
+if ~isempty(comparisonManifest)
+    result.xyIlluminationComparisonManifest = comparisonManifest;
+end
 end
 
 function [selection, stageDir] = runIlluminationSelectionStage( ...
@@ -160,11 +186,7 @@ end
 function [model, audit, stageDir] = runIlluminationStage( ...
         datasetIndex, cfg, repoRoot, overwrite)
 % Fit the configured illumination method and save its common outputs.
-if strcmpi(cfg.illumination.method, "tissueOtsu")
-    stageName = fullfile("02_illumination", "tissue_otsu", "02_model");
-else
-    stageName = "02_illumination_pilot";
-end
+stageName = illuminationStageName(cfg);
 stageDir = stpt.prepareStageDirectory(cfg.paths.outputRoot, stageName, overwrite);
 diary(fullfile(stageDir, "stage.log"));
 diaryCleanup = onCleanup(@() diary("off"));
@@ -185,6 +207,57 @@ writelines("Stage 2 completed " + string(datetime("now")), ...
 
 fprintf("Stage 2 complete: %s fitted from %d training sections.\n", ...
     cfg.illumination.method, numel(cfg.illumination.trainingSections));
+fprintf("Outputs: %s\n\n", stageDir);
+end
+
+function stageName = illuminationStageName(cfg)
+% Keep the Stage 2 output path identical for fitting and prerequisite loading.
+if strcmpi(cfg.illumination.method, "tissueOtsu")
+    stageName = fullfile("02_illumination", "tissue_otsu", "02_model");
+else
+    stageName = "02_illumination_pilot";
+end
+end
+
+function [manifest, stageDir, comparisonManifest] = runFusionPilotStage( ...
+        datasetIndex, model, cfg, repoRoot, overwrite)
+% Run the shared fusion engine on the derived center section and write full QC.
+signature = stpt.fusion.buildSignature(datasetIndex, model, cfg);
+stageDir = string(fullfile(cfg.paths.outputRoot, "03_fusion"));
+completionPath = fullfile(stageDir, "pilot_complete.txt");
+stageDir = stpt.fusion.prepareOutputDirectory( ...
+    cfg.paths.outputRoot, signature, overwrite);
+
+diary(fullfile(stageDir, "stage.log"));
+diaryCleanup = onCleanup(@() diary("off"));
+provenance = stpt.captureProvenance(repoRoot);
+logRunHeader(cfg, provenance, "Stage 3: center-section fusion pilot", stageDir);
+
+save(fullfile(stageDir, "resolved_config.mat"), "cfg", "provenance");
+stpt.writeProvenance(provenance, fullfile(stageDir, "provenance.txt"));
+
+sectionNumber = cfg.sampling.fusionPilotSection;
+geometry = stpt.fusion.computeGeometry(datasetIndex, sectionNumber);
+writetable(geometry.placements, fullfile(stageDir, "tile_placement.csv"));
+canonicalRoot = string(fullfile(stageDir, "stitched"));
+manifest = stpt.fusion.processPlanes( ...
+    datasetIndex, model, cfg, sectionNumber, canonicalRoot, ...
+    fullfile(stageDir, "fusion_manifest.csv"));
+stpt.fusion.writePilotQC( ...
+    datasetIndex, model, cfg, sectionNumber, manifest, stageDir);
+
+% Optional comparisons are independent products. They use the same fusion
+% interface but never source planes from the canonical stitched tree.
+comparisonManifest = table();
+if cfg.qc.comparisons.xyIllumination
+    comparisonManifest = stpt.fusion.writeXYIlluminationComparison( ...
+        datasetIndex, model, cfg, sectionNumber, stageDir);
+end
+
+writelines("Fusion pilot completed " + string(datetime("now")), ...
+    completionPath);
+fprintf("Stage 3 pilot complete: section %d, %d fused planes.\n", ...
+    sectionNumber, height(manifest));
 fprintf("Outputs: %s\n\n", stageDir);
 end
 

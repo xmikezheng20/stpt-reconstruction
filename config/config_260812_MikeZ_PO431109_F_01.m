@@ -42,6 +42,11 @@ cfg.stitching.targetStepUm = [700, 700];     % [x, y]
 % Cropping changes retained support, but does not define tile placement.
 cfg.preprocessing.cropPixels = [15, 15, 15, 15]; % [left right top bottom]
 
+% Native TissueCyte TIFF axes do not match the target-stage grid. The legacy
+% OpenSTP conversion used fliplr(image'), which is a 90-degree clockwise turn.
+% Illumination is fitted/applied in raw orientation before this transform.
+cfg.preprocessing.tileOrientation = "rot90cw";
+
 % Process the complete planned acquisition by default. For a partial dataset,
 % explicitly move sectionStop back to the last section known to be complete.
 cfg.processing.sectionStart = 1;
@@ -69,10 +74,19 @@ cfg.illumination.stitchitReference.thresholdScale = 1.01;
 cfg.illumination.stitchitReference.maxRejectedFraction = 0.85;
 cfg.illumination.stitchitReference.minimumTilesPerParity = 2;
 cfg.illumination.stitchitReference.acrossSectionTrimPercent = 10;
+% Fusion uses the same scientific and file-writing settings in pilot and
+% production. The pilot section itself is derived from the processing range.
 cfg.fusion.mode = "overwrite";
+cfg.fusion.compression = "lzw";
+cfg.fusion.qcPreviewScale = 0.10;
 
-% Development checkpoint: fit the direct pooled illumination model from the
-% completed tissue-selection output, but do not yet write corrected TIFFs.
-cfg.execution.stopAfter = "illuminationModel";
+% Optional scientific comparisons are isolated from the canonical pipeline.
+% This reconstructs full-resolution correction-on/off variants for every
+% configured channel and layer through the same fusion interface.
+cfg.qc.comparisons.xyIllumination = true;
+
+% Development checkpoint: reconstruct the center section in every configured
+% channel and optical layer, then write compact fusion QC.
+cfg.execution.stopAfter = "fusionPilot";
 cfg.execution.overwrite = false;
 end

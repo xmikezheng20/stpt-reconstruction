@@ -49,6 +49,11 @@ if numel(unique(cfg.preprocessing.cropPixels)) ~= 1
     error("stpt:Crop", ...
         "This pipeline currently requires the same crop on all four sides.");
 end
+if ~isfield(cfg.preprocessing, "tileOrientation") || ...
+        ~any(strcmpi(cfg.preprocessing.tileOrientation, ["none", "rot90cw"]))
+    error("stpt:TileOrientation", ...
+        "cfg.preprocessing.tileOrientation must be none or rot90cw.");
+end
 
 % Cropping may shrink support, but it must leave positive XY overlap at the
 % configured target step so later fusion has no gaps between nominal tiles.
@@ -63,6 +68,11 @@ end
 if any(retainedSize <= targetStepPixels)
     error("stpt:CropOverlap", ...
         "Cropping must leave positive overlap at the configured target step.");
+end
+if strcmpi(cfg.preprocessing.tileOrientation, "rot90cw") && ...
+        retainedSize(1) ~= retainedSize(2)
+    error("stpt:TileOrientation", ...
+        "The current rot90cw implementation requires square retained tiles.");
 end
 
 % Resolve the exact reconstruction range. The acquisition count remains the
@@ -98,6 +108,7 @@ end
 cfg.sampling.illuminationSections = ...
     sectionStart:illuminationStride:sectionStop;
 cfg.sampling.qcSections = sectionStart:qcStride:sectionStop;
+cfg.sampling.fusionPilotSection = round((sectionStart + sectionStop) / 2);
 cfg.qc.representativeSections = cfg.sampling.qcSections;
 
 % Keep the initial implementation deliberately narrow and auditable.
@@ -106,7 +117,8 @@ if ~strcmpi(cfg.stitching.positionSource, "target")
         "The initial implementation supports target positions only.");
 end
 
-validStops = ["index", "illuminationSelection", "illuminationModel"];
+validStops = ["index", "illuminationSelection", "illuminationModel", ...
+    "fusionPilot"];
 if ~any(strcmpi(cfg.execution.stopAfter, validStops))
     error("stpt:StopAfter", "cfg.execution.stopAfter must be %s.", ...
         strjoin(validStops, " or "));
@@ -120,6 +132,40 @@ if isfield(cfg, "illumination")
     cfg.illumination.trainingSections = ...
         cfg.sampling.illuminationSections;
     cfg.illumination.qcSections = cfg.sampling.qcSections;
+end
+
+% The first fusion implementation deliberately exposes one clear policy. The
+% interface leaves room for blending later without mixing it into placement.
+if strcmpi(cfg.execution.stopAfter, "fusionPilot")
+    if ~isfield(cfg, "fusion")
+        error("stpt:MissingConfig", "Stage 3 requires cfg.fusion.");
+    end
+    requiredFusionFields = ["mode", "compression", "qcPreviewScale"];
+    for field = requiredFusionFields
+        if ~isfield(cfg.fusion, field)
+            error("stpt:FusionConfig", "Missing cfg.fusion.%s.", field);
+        end
+    end
+    if ~strcmpi(cfg.fusion.mode, "overwrite")
+        error("stpt:FusionConfig", ...
+            "The initial fusion implementation supports overwrite mode only.");
+    end
+    if ~strcmpi(cfg.fusion.compression, "lzw")
+        error("stpt:FusionConfig", ...
+            "Fusion TIFF compression must currently be lossless LZW.");
+    end
+    if ~isscalar(cfg.fusion.qcPreviewScale) || ...
+            cfg.fusion.qcPreviewScale <= 0 || cfg.fusion.qcPreviewScale > 1
+        error("stpt:FusionConfig", ...
+            "cfg.fusion.qcPreviewScale must be in (0, 1].");
+    end
+    if ~isfield(cfg.qc, "comparisons") || ...
+            ~isfield(cfg.qc.comparisons, "xyIllumination") || ...
+            ~islogical(cfg.qc.comparisons.xyIllumination) || ...
+            ~isscalar(cfg.qc.comparisons.xyIllumination)
+        error("stpt:FusionConfig", ...
+            "cfg.qc.comparisons.xyIllumination must be true or false.");
+    end
 end
 
 % Normalize filesystem values once so downstream code uses one path type.
