@@ -4,7 +4,7 @@ function [manifest, diagnostics] = processSections( ...
 %
 % Fusion produces one uint16 mosaic per layer. Z illumination is then corrected
 % across the layers of that physical section and channel before any final TIFF
-% is published. Pilot, comparison, and future production runs share this worker.
+% is published. Pilot, comparison, and production runs share this worker.
 
 if isfolder(outputRoot)
     error("stpt:ReconstructionOutput", ...

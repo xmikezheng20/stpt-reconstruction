@@ -42,10 +42,12 @@ model contract, and `applyModel` applies the clear pointwise calculation
 channel for `tissueOtsu`; the optional StitchIt-reference method does not use
 tissue classification.
 
-Stage 3 is currently a reconstruction pilot on the section at the center of the
-configured processing range. It streams native tiles, applies crop and
-illumination correction in raw orientation, rotates each corrected tile 90
-degrees clockwise to match the target-stage axes, and places retained
+Stage 3 provides independent pilot and production targets through the same
+section-level worker. The pilot reconstructs the section at the center of the
+configured processing range; production reconstructs every requested section.
+Both stream native tiles, apply crop and illumination correction in raw
+orientation, rotate each corrected tile 90 degrees clockwise to match the
+target-stage axes, and place retained
 802-by-802 tiles at the recorded 700-pixel target step. This explicit transform
 reproduces OpenSTP's `fliplr(image')`; no final mosaic transform is applied.
 Overlapping corrected tiles are combined with OpenSTP's Fiji-style normalized
@@ -56,11 +58,17 @@ first layer using StitchIt's spatial-ratio z-illumination correction. All layers
 of one physical section/channel are processed together, and only final
 z-corrected TIFFs are written. A one-layer acquisition passes through unchanged.
 
-The pilot and future production reconstruction share the same geometry, plane
+The pilot and production reconstruction share the same geometry, plane
 fusion, TIFF writer, and manifest schema. They intentionally use independent
 output trees: the pilot is a small validation product, not partial production
 output. Production can therefore begin from one unambiguous clean stage after
 the pilot settings have been accepted.
+
+Production writes only canonical final TIFFs under
+`03_reconstruction/production/stitched`. Minimal QC reads the published TIFFs
+at `cfg.sampling.qcSections` using one fixed display range per channel and plots
+the z-gain percentile trend across the complete volume. It does not run pilot
+comparisons or retain full gain fields.
 
 The optional `cfg.qc.comparisons.reconstructionSteps` flag independently
 reconstructs four versions of every pilot channel/layer plane: no correction
@@ -90,14 +98,22 @@ runStptReconstruction(config_260812_MikeZ_PO431109_F_01());
 The master runner orchestrates the implemented stages from the same experiment
 config.
 
+To run production without running the pilot:
+
+```matlab
+cfg = config_260812_MikeZ_PO431109_F_01();
+cfg.execution.stopAfter = "reconstructionProduction";
+runStptReconstruction(cfg);
+```
+
 Computation and visualization have independent regular samples. With
 `illuminationEveryNSections = 10`, Stage 2 fitting uses sections
 `1, 11, ..., 291`; with `qcEveryNSections = 50`, Stage 1/2 plots use
 `1, 51, 101, 151, 201, 251`. Final sections are not appended automatically.
 The reconstruction pilot section is
 `round((sectionStart + sectionStop)/2)`, which is
-section 151 for the default 1:300 range. The same every-50 sequence is reserved
-for compact QC during future production reconstruction.
+section 151 for the default 1:300 range. Production uses the same every-50
+sequence for compact final-volume QC.
 
 The planned metadata count remains `cfg.acquisition.sectionCount`. To process
 only a complete prefix or subset, override the reconstruction range explicitly:
@@ -132,12 +148,15 @@ runStptReconstruction(cfg);
 ```
 
 The experiment config currently stops after the Stage 3 reconstruction pilot.
-The terminal-stage name is `reconstructionPilot`. Tissue
+The Stage 3 terminal names are `reconstructionPilot` and
+`reconstructionProduction`. Tissue
 selection is stored under `02_illumination/tissue_otsu/01_selection`; the fitted
 model is stored under `02_illumination/tissue_otsu/02_model`; canonical pilot
 planes and QC are stored under `03_reconstruction/pilot`. Neither Stage 2
 substep writes corrected TIFFs. The optional StitchIt-reference model uses the
-parallel path `02_illumination/stitchit_reference/02_model`.
+parallel path `02_illumination/stitchit_reference/02_model`. Production planes,
+manifest, summary, and minimal QC are stored under
+`03_reconstruction/production`.
 
 ## Code organization
 
@@ -153,7 +172,7 @@ The package is divided by responsibility:
 | `stpt.preprocessing` | Apply the explicit native-TIFF-to-target-grid tile orientation after illumination correction. |
 | `stpt.fusion` | Compute target-grid geometry, prepare native tiles, and dispatch overwrite or Fiji-style mosaic fusion. |
 | `stpt.zillumination` | Apply the shared within-section optical-layer interface and StitchIt smooth-ratio correction. |
-| `stpt.reconstruction` | Group fused layers by section/channel, apply z correction, publish final TIFFs and manifests, record provenance, and generate pilot QC. |
+| `stpt.reconstruction` | Group fused layers by section/channel, apply z correction, publish final TIFFs and manifests, record provenance, and generate pilot or production QC. |
 
 The master runner owns stage order and derived-output directories; scientific
 algorithms do not rename or reorganize raw files.
@@ -185,6 +204,7 @@ StitchIt source reference: `383b9fbd5f0664bf232c897a87759d8da43b725c`
 | `stpt.fusion.fuseFijiBlendPlane` | OpenSTP `stitchMosaic.c`, `calcWeightImageAsInFiji.m` | Implements normalized Fiji-style distance weighting on our recorded target-grid placement; uses normalized single-precision weights and blockwise final casting. |
 | `stpt.zillumination.stitchitSmoothRatio` | `+stitchit/+artifactCorrection/correctZilluminationInDirectory.m` | Close port of the reduced-resolution broad Gaussian and reference/target ratio; omits StitchIt's directory parsing, overwrite behavior, parallel pool logic, and uncompressed writer. |
 | `stpt.reconstruction.writePilotQC` | `stitcher.m` chessboard mode (concept only) | Independent final center-section previews, channel overlay, and lightweight red/green tile checkerboard. |
+| `stpt.reconstruction.writeProductionQC` | None | Independent fixed-scale representative sections, manifest-based z-gain trends, and production summary. |
 
 Shared interface functions contain no StitchIt estimation logic:
 
@@ -217,5 +237,4 @@ step. Fiji blending is the canonical fusion mode; reverse-order overwrite is
 retained only for the two controlled pilot comparisons. Production downsampling
 will remain a separate final stage.
 
-Planned extensions are production-wide reconstruction through the same
-section-level worker, separate final downsampling, and plane-level parallelism.
+Planned extensions are separate final downsampling and plane-level parallelism.

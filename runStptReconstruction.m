@@ -83,18 +83,27 @@ if targetStage == "illuminationmodel"
     return
 end
 
-% Stage 3 runs the shared reconstruction core on one derived center section.
-% The pilot is an independent, disposable validation product; production will
-% use a separate output tree.
-[reconstructionManifest, reconstructionDir, comparisonManifest] = ...
-    runReconstructionPilotStage( ...
-        datasetIndex, illuminationModel, cfg, repoRoot, ...
-        cfg.execution.overwrite);
-result.reconstructionManifest = reconstructionManifest;
-result.reconstructionDirectory = reconstructionDir;
-if ~isempty(comparisonManifest)
-    result.reconstructionStepComparisonManifest = comparisonManifest;
+% Pilot and production are independent Stage 3 products that share the same
+% section worker. Neither reconstruction tree is a prerequisite for the other.
+switch targetStage
+    case "reconstructionpilot"
+        [manifest, reconstructionDir, comparisonManifest] = ...
+            runReconstructionPilotStage( ...
+            datasetIndex, illuminationModel, cfg, repoRoot, ...
+            cfg.execution.overwrite);
+        if ~isempty(comparisonManifest)
+            result.reconstructionStepComparisonManifest = comparisonManifest;
+        end
+    case "reconstructionproduction"
+        [manifest, reconstructionDir] = runReconstructionProductionStage( ...
+            datasetIndex, illuminationModel, cfg, repoRoot, ...
+            cfg.execution.overwrite);
+    otherwise
+        error("stpt:StopAfter", ...
+            "Unexpected reconstruction target: %s", cfg.execution.stopAfter);
 end
+result.reconstructionManifest = manifest;
+result.reconstructionDirectory = reconstructionDir;
 end
 
 function [selection, stageDir] = runIlluminationSelectionStage( ...
@@ -259,6 +268,40 @@ writelines("Reconstruction pilot completed " + string(datetime("now")), ...
     fullfile(stageDir, "stage_complete.txt"));
 fprintf("Stage 3 pilot complete: section %d, %d reconstructed planes.\n", ...
     sectionNumber, height(manifest));
+fprintf("Outputs: %s\n\n", stageDir);
+end
+
+function [manifest, stageDir] = runReconstructionProductionStage( ...
+        datasetIndex, model, cfg, repoRoot, overwrite)
+% Reconstruct the configured section range into one clean production tree.
+stageName = fullfile("03_reconstruction", "production");
+stageDir = stpt.prepareStageDirectory( ...
+    cfg.paths.outputRoot, stageName, overwrite);
+
+diary(fullfile(stageDir, "stage.log"));
+diaryCleanup = onCleanup(@() diary("off"));
+provenance = stpt.captureProvenance(repoRoot);
+logRunHeader(cfg, provenance, "Stage 3: production reconstruction", stageDir);
+
+save(fullfile(stageDir, "resolved_config.mat"), "cfg", "provenance");
+stpt.writeProvenance(provenance, fullfile(stageDir, "provenance.txt"));
+
+sections = cfg.processing.sections;
+signature = stpt.reconstruction.buildSignature( ...
+    datasetIndex, model, cfg, sections);
+save(fullfile(stageDir, "reconstruction_signature.mat"), "signature");
+
+canonicalRoot = string(fullfile(stageDir, "stitched"));
+manifest = stpt.reconstruction.processSections( ...
+    datasetIndex, model, cfg, sections, canonicalRoot);
+stpt.writeTableAtomic(manifest, fullfile(stageDir, "manifest.csv"));
+stpt.reconstruction.writeProductionQC( ...
+    datasetIndex, cfg, manifest, stageDir);
+
+writelines("Production reconstruction completed " + ...
+    string(datetime("now")), fullfile(stageDir, "stage_complete.txt"));
+fprintf("Stage 3 production complete: %d sections, %d reconstructed planes.\n", ...
+    numel(sections), height(manifest));
 fprintf("Outputs: %s\n\n", stageDir);
 end
 

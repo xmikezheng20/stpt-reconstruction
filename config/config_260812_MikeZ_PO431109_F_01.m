@@ -95,8 +95,8 @@ cfg.zIllumination.filterAreaFraction = 0.01;
 % Reconstruct the ordered additions of XY correction, blending, and z correction.
 cfg.qc.comparisons.reconstructionSteps = true;
 
-% Development checkpoint: reconstruct the center section in every configured
-% channel and optical layer, then write compact reconstruction QC.
+% Keep the validated center-section pilot as the default during development.
+% Use "reconstructionProduction" to reconstruct cfg.processing.sections.
 cfg.execution.stopAfter = "reconstructionPilot";
 cfg.execution.overwrite = false;
 end
