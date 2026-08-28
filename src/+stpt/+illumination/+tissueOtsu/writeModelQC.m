@@ -69,7 +69,7 @@ if fid < 0
     error("stpt:WriteOutput", "Could not write %s.", outputPath);
 end
 
-fprintf(fid, "Tissue-Otsu direct pooled illumination model completed\n");
+fprintf(fid, "Tissue-Otsu illumination model completed\n");
 fprintf(fid, "Training sections: %s\n", mat2str(model.trainingSections));
 fprintf(fid, "QC sections: %s\n", mat2str(audit.qcSections));
 fprintf(fid, "Selection source: %s\n", audit.selectionPath);

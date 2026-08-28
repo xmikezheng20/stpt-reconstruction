@@ -176,7 +176,7 @@ clim([-differenceLimit, differenceLimit]); colorbar
 title("Odd-even difference (%)");
 colormap(ax, redWhiteBlue(256));
 
-sgtitle(sprintf("Pilot template: ch%d, layer %d | correlation %.4f | median |difference| %.2f%%", ...
+sgtitle(sprintf("Illumination template: ch%d, layer %d | correlation %.4f | median |difference| %.2f%%", ...
     template.channel, template.layer, fieldCorrelation, medianDifference));
 exportgraphics(fig, outputPath, "Resolution", 150);
 close(fig);

@@ -26,8 +26,9 @@ placements.yStart = 1 + (placements.gridY - 1) * step(2);
 placements.xEnd = placements.xStart + tileSize(1) - 1;
 placements.yEnd = placements.yStart + tileSize(2) - 1;
 
-% StitchIt lays tiles down in reverse acquisition order. Since overwrite is
-% last-tile-wins, lower acquisition indices receive the highest priority.
+% Use one deterministic traversal for both fusion algorithms. Reverse order
+% gives lower acquisition indices priority in the overwrite control; normalized
+% blending is mathematically independent of traversal order.
 [~, reverseOrder] = sort(placements.acquisitionIndex, "descend");
 placements.placementOrder = zeros(height(placements), 1);
 placements.placementOrder(reverseOrder) = (1:height(placements))';

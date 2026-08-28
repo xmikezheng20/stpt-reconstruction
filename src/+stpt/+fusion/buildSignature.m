@@ -19,6 +19,7 @@ signature.tileOrientation = string(cfg.preprocessing.tileOrientation);
 signature.modelSchemaVersion = model.schemaVersion;
 signature.modelCreated = string(model.created);
 signature.modelMethod = string(model.method);
+signature.modelRowMode = string(model.rowMode);
 signature.modelTrainingSections = model.trainingSections;
 signature.fusionMode = string(cfg.fusion.mode);
 if strcmpi(cfg.fusion.mode, "fijiBlend")

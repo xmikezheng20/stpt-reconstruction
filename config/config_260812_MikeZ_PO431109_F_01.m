@@ -36,10 +36,9 @@ cfg.acquisition.gridSize = [14, 18];         % [tiles x, tiles y]
 cfg.stitching.positionSource = "target";
 cfg.stitching.targetStepUm = [700, 700];     % [x, y]
 
-% Experiment-specific starting value for later stitching tests. StitchIt's
-% proportional default would round to 18 pixels for an 832-pixel tile; our
-% explicit 15-pixel value must therefore be validated on this TissueCyte data.
-% Cropping changes retained support, but does not define tile placement.
+% Retain OpenSTP's established symmetric 15-pixel crop for this microscope.
+% StitchIt's proportional default would round to 18 pixels for an 832-pixel
+% tile. Cropping changes retained support, but does not define tile placement.
 cfg.preprocessing.cropPixels = [15, 15, 15, 15]; % [left right top bottom]
 
 % Native TissueCyte TIFF axes do not match the target-stage grid. The legacy
@@ -57,8 +56,8 @@ cfg.processing.sectionStop = cfg.acquisition.sectionCount;
 cfg.sampling.illuminationEveryNSections = 10;
 cfg.sampling.qcEveryNSections = 50;
 
-% Shared illumination interface. The initial alternative method uses one global
-% log-Otsu threshold on cropped green tiles to select tissue-bearing locations.
+% The tissue-aware method uses one global log-Otsu threshold on cropped green
+% tiles to select tissue-bearing locations.
 cfg.illumination.method = "tissueOtsu";
 % A pooled model applies one correction field to every scan row. Set this to
 % "split" only when odd/even acquisition directions differ materially.
@@ -78,15 +77,14 @@ cfg.illumination.stitchitReference.minimumTilesPerParity = 2;
 cfg.illumination.stitchitReference.acrossSectionTrimPercent = 10;
 % Fusion uses the same scientific and file-writing settings in pilot and
 % production. The pilot section itself is derived from the processing range.
-cfg.fusion.mode = "overwrite";
+cfg.fusion.mode = "fijiBlend";
 cfg.fusion.compression = "lzw";
 cfg.fusion.qcPreviewScale = 0.10;
 cfg.fusion.blending.method = "fijiDistance";
 cfg.fusion.blending.alpha = 1.5;
 
-% Reconstruct three matched full-resolution pilot variants: no correction
-% with overwrite, corrected illumination with overwrite, and corrected
-% illumination with Fiji-style blending.
+% Keep the two overwrite conditions only as controls around the canonical
+% corrected, Fiji-blended reconstruction.
 cfg.qc.comparisons.reconstructionSteps = true;
 
 % Development checkpoint: reconstruct the center section in every configured

@@ -45,7 +45,7 @@ end
 
 plotChannelLayers(datasetIndex, cfg, sectionNumber, previews, displayLimits, ...
     fullfile(qcDir, "center_section_channels_layers.png"));
-plotChannelOverlay(datasetIndex, sectionNumber, previews, displayLimits, ...
+plotChannelOverlay(datasetIndex, cfg, sectionNumber, previews, displayLimits, ...
     fullfile(qcDir, "center_section_red_green_overlay.png"));
 plotChessboard(datasetIndex, model, cfg, sectionNumber, displayLimits, ...
     fullfile(qcDir, "center_section_green_chessboard.png"));
@@ -81,7 +81,7 @@ exportgraphics(fig, outputPath, "Resolution", 160);
 close(fig);
 end
 
-function plotChannelOverlay(datasetIndex, sectionNumber, previews, ...
+function plotChannelOverlay(datasetIndex, cfg, sectionNumber, previews, ...
         displayLimits, outputPath)
 % Confirm that red and green channels occupy the same stitched coordinates.
 names = lower(string({datasetIndex.channels.name}));
@@ -101,7 +101,8 @@ overlay = cat(3, red, green, zeros(size(red), "single"));
 fig = figure("Visible", "off", "Color", "w", ...
     "Position", [100, 100, 900, 1000]);
 imshow(overlay);
-title(sprintf("Section %d, layer 1: red ch1 / green ch2", sectionNumber));
+title(sprintf("Section %d, layer 1: red ch1 / green ch2 (%s fusion)", ...
+    sectionNumber, fusionModeLabel(cfg)));
 exportgraphics(fig, outputPath, "Resolution", 160);
 close(fig);
 end
@@ -184,7 +185,7 @@ title(sprintf("Section %d, green layer 1: tile checkerboard", sectionNumber));
 nexttile
 imshow(inset);
 title("Native-resolution central junction");
-sgtitle("Red/green tiles; yellow regions are nominal overlap");
+sgtitle("Tile-placement QC (not fused); yellow regions are nominal overlap");
 exportgraphics(fig, outputPath, "Resolution", 160);
 close(fig);
 end

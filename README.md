@@ -26,9 +26,9 @@ then directly pools the selected locations across sections to fit odd/even
 illumination templates for each channel and layer. By default, their
 count-weighted pooled field supplies one correction for all tile rows; `split`
 remains available when odd/even scan directions differ materially. The
-estimator uses a 10%
-pixelwise trimmed mean, zero additive offset, and StitchIt's median-normalized
-gain construction. It does not write corrected TIFFs or perform stitching.
+estimator uses a 10% pixelwise trimmed mean, zero additive offset, and StitchIt's
+median-normalized gain construction. It does not write corrected TIFFs or
+perform stitching.
 
 For auditability, Stage 2 retains separate selection and model subdirectories,
 but the master runner executes them as one operational stage. The optional
@@ -48,10 +48,10 @@ illumination correction in raw orientation, rotates each corrected tile 90
 degrees clockwise to match the target-stage axes, and places retained
 802-by-802 tiles at the recorded 700-pixel target step. This explicit transform
 reproduces OpenSTP's `fliplr(image')`; no final mosaic transform is applied.
-Tiles are written in reverse acquisition order,
-so the earlier-acquired tile wins each 102-pixel overlap, matching StitchIt's
-default no-blend behavior. The four channel/layer planes are canonical uint16
-TIFFs with lossless LZW compression; no corrected tile intermediates are made.
+Overlapping corrected tiles are combined with OpenSTP's Fiji-style normalized
+distance weights using `alpha=1.5`. The four channel/layer planes are canonical
+uint16 TIFFs with lossless LZW compression; no corrected tile intermediates are
+made.
 
 The pilot and future production reconstruction share the same geometry, plane
 fusion, writer, output paths, and manifest. The pilot differs only by supplying
@@ -125,7 +125,8 @@ The experiment config currently stops after the Stage 3 fusion pilot. Tissue
 selection is stored under `02_illumination/tissue_otsu/01_selection`; the fitted
 model is stored under `02_illumination/tissue_otsu/02_model`; canonical fused
 planes and pilot QC are stored under `03_fusion`. Neither Stage 2 substep writes
-corrected TIFFs.
+corrected TIFFs. The optional StitchIt-reference model uses the parallel path
+`02_illumination/stitchit_reference/02_model`.
 
 ## Code organization
 
@@ -197,9 +198,9 @@ to Fiji-style weighted blending with `alpha=1.5`. Its configured 12% overlap
 places an 802-pixel retained tile at `floor(0.88 * 802) = 705` pixels. This
 pipeline keeps the crop, normalized Fiji weight formula, and lossless LZW final
 output, but applies correction in memory and uses the recorded 700-pixel target
-step. StitchIt's reverse-order overwrite remains the canonical pilot mode until
-the three-step comparison is accepted. Production downsampling will remain a
-separate final stage.
+step. Fiji blending is the canonical fusion mode; reverse-order overwrite is
+retained only for the two controlled pilot comparisons. Production downsampling
+will remain a separate final stage.
 
 Planned extensions are production-wide fusion with compact every-50-section QC,
 z illumination correction on the fused volume, final downsampling, and

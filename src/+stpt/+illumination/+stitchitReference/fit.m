@@ -3,7 +3,7 @@ function [model, audit] = fit(datasetIndex, cfg, stageDir)
 %
 % This method preserves StitchIt's detector-floor rejection, row-parity split,
 % and two-level trimmed means. It reads native TIFFs through the shared loader
-% and returns the same standard offset-and-gain model as future algorithms.
+% and returns the same standard offset-and-gain model as other algorithms.
 
 stageDir = string(stageDir);
 averageDir = fullfile(stageDir, "section_averages");

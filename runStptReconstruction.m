@@ -31,7 +31,7 @@ if targetStage == "index"
     return
 end
 
-% Checkpoint 1 classifies tissue-bearing tile locations without fitting a model.
+% Tissue selection is an independently auditable part of Stage 2.
 if targetStage == "illuminationselection"
     [tissueSelection, selectionDir] = runIlluminationSelectionStage( ...
         datasetIndex, cfg, repoRoot, cfg.execution.overwrite);
@@ -53,7 +53,7 @@ if strcmpi(cfg.illumination.method, "tissueOtsu")
             selectionPath, datasetIndex, cfg);
         fprintf("Loading completed tissue selection: %s\n", selectionDir);
     else
-        fprintf("Tissue selection is absent; running checkpoint 1 first.\n");
+        fprintf("Tissue selection is absent; running that Stage 2 substep first.\n");
         [~, selectionDir] = runIlluminationSelectionStage( ...
             datasetIndex, cfg, repoRoot, false);
     end
@@ -104,7 +104,7 @@ diary(fullfile(stageDir, "stage.log"));
 diaryCleanup = onCleanup(@() diary("off"));
 provenance = stpt.captureProvenance(repoRoot);
 logRunHeader(cfg, provenance, ...
-    "Stage 2 checkpoint 1: tissue selection", stageDir);
+    "Stage 2: tissue selection", stageDir);
 
 save(fullfile(stageDir, "resolved_config.mat"), "cfg", "provenance");
 stpt.writeProvenance(provenance, fullfile(stageDir, "provenance.txt"));
@@ -192,7 +192,7 @@ diary(fullfile(stageDir, "stage.log"));
 diaryCleanup = onCleanup(@() diary("off"));
 provenance = stpt.captureProvenance(repoRoot);
 logRunHeader(cfg, provenance, ...
-    "Stage 2 checkpoint 2: illumination model", stageDir);
+    "Stage 2: illumination model", stageDir);
 
 save(fullfile(stageDir, "resolved_config.mat"), "cfg", "provenance");
 stpt.writeProvenance(provenance, fullfile(stageDir, "provenance.txt"));
@@ -212,10 +212,15 @@ end
 
 function stageName = illuminationStageName(cfg)
 % Keep the Stage 2 output path identical for fitting and prerequisite loading.
-if strcmpi(cfg.illumination.method, "tissueOtsu")
-    stageName = fullfile("02_illumination", "tissue_otsu", "02_model");
-else
-    stageName = "02_illumination_pilot";
+switch lower(string(cfg.illumination.method))
+    case "tissueotsu"
+        stageName = fullfile("02_illumination", "tissue_otsu", "02_model");
+    case "stitchitreference"
+        stageName = fullfile("02_illumination", ...
+            "stitchit_reference", "02_model");
+    otherwise
+        error("stpt:IlluminationMethod", ...
+            "Unknown illumination method: %s", cfg.illumination.method);
 end
 end
 

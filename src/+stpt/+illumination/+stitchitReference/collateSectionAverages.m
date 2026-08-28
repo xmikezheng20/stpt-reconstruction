@@ -8,7 +8,7 @@ function template = collateSectionAverages(sectionAverages, referenceConfig)
 sectionAverages = sectionAverages(:);
 if isempty(sectionAverages) || any(cellfun(@isempty, sectionAverages))
     error("stpt:MissingSectionAverage", ...
-        "Every pilot section must provide an illumination average.");
+        "Every training section must provide an illumination average.");
 end
 
 first = sectionAverages{1};
