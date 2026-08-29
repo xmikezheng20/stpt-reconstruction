@@ -26,7 +26,7 @@ cfg.channels = struct( ...
 cfg.acquisition.metadataChannel = 1;
 cfg.acquisition.sectionCount = 300; % Planned count recorded in Mosaic metadata
 cfg.acquisition.layersPerSection = 2;
-cfg.acquisition.sectionThicknessUm = 25;
+cfg.acquisition.planeSpacingUm = 25;
 cfg.acquisition.pixelSizeUm = [1, 1];       % [x, y]
 cfg.acquisition.tileSizePixels = [832, 832]; % [width, height]
 cfg.acquisition.gridSize = [14, 18];         % [tiles x, tiles y]
@@ -91,6 +91,11 @@ cfg.zIllumination.method = "stitchitSmoothRatio";
 cfg.zIllumination.referenceLayer = 1;
 cfg.zIllumination.maxEstimationPixels = 1.5e6;
 cfg.zIllumination.filterAreaFraction = 0.01;
+
+% Stage 4 resamples the ordered final planes to one compact registration
+% volume per channel. Voxel vectors use [z, y, x] order throughout.
+cfg.downsampling.outputVoxelSizeUm = [25, 25, 25];
+cfg.downsampling.compression = "lzw";
 
 % Reconstruct the ordered additions of XY correction, blending, and z correction.
 cfg.qc.comparisons.reconstructionSteps = true;

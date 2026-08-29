@@ -83,27 +83,49 @@ if targetStage == "illuminationmodel"
     return
 end
 
-% Pilot and production are independent Stage 3 products that share the same
-% section worker. Neither reconstruction tree is a prerequisite for the other.
-switch targetStage
-    case "reconstructionpilot"
-        [manifest, reconstructionDir, comparisonManifest] = ...
-            runReconstructionPilotStage( ...
-            datasetIndex, illuminationModel, cfg, repoRoot, ...
-            cfg.execution.overwrite);
-        if ~isempty(comparisonManifest)
-            result.reconstructionStepComparisonManifest = comparisonManifest;
-        end
-    case "reconstructionproduction"
-        [manifest, reconstructionDir] = runReconstructionProductionStage( ...
-            datasetIndex, illuminationModel, cfg, repoRoot, ...
-            cfg.execution.overwrite);
-    otherwise
-        error("stpt:StopAfter", ...
-            "Unexpected reconstruction target: %s", cfg.execution.stopAfter);
+% The pilot is independent of production and is never a prerequisite for it.
+if targetStage == "reconstructionpilot"
+    [manifest, reconstructionDir, comparisonManifest] = ...
+        runReconstructionPilotStage(datasetIndex, illuminationModel, cfg, ...
+        repoRoot, cfg.execution.overwrite);
+    result.reconstructionManifest = manifest;
+    result.reconstructionDirectory = reconstructionDir;
+    if ~isempty(comparisonManifest)
+        result.reconstructionStepComparisonManifest = comparisonManifest;
+    end
+    return
+end
+
+% Stage 4 consumes the completed production reconstruction. Build Stage 3 if
+% absent; otherwise validate and reuse the exact final-plane manifest.
+reconstructionDir = string(fullfile(cfg.paths.outputRoot, ...
+    "03_reconstruction", "production"));
+reconstructionComplete = isfile(fullfile( ...
+    reconstructionDir, "stage_complete.txt"));
+if targetStage == "reconstructionproduction" || ~reconstructionComplete
+    [manifest, reconstructionDir] = runReconstructionProductionStage( ...
+        datasetIndex, illuminationModel, cfg, repoRoot, ...
+        targetStage == "reconstructionproduction" && cfg.execution.overwrite);
+else
+    fprintf("Loading completed Stage 3 production: %s\n", reconstructionDir);
+    manifest = stpt.reconstruction.loadCompletedProduction( ...
+        reconstructionDir, datasetIndex, illuminationModel, cfg);
 end
 result.reconstructionManifest = manifest;
 result.reconstructionDirectory = reconstructionDir;
+
+if targetStage == "reconstructionproduction"
+    return
+end
+if targetStage ~= "downsampling"
+    error("stpt:StopAfter", ...
+        "Unexpected terminal stage: %s", cfg.execution.stopAfter);
+end
+
+[downsamplingManifest, downsamplingDir] = runDownsamplingStage( ...
+    manifest, datasetIndex, cfg, repoRoot, cfg.execution.overwrite);
+result.downsamplingManifest = downsamplingManifest;
+result.downsamplingDirectory = downsamplingDir;
 end
 
 function [selection, stageDir] = runIlluminationSelectionStage( ...
@@ -302,6 +324,32 @@ writelines("Production reconstruction completed " + ...
     string(datetime("now")), fullfile(stageDir, "stage_complete.txt"));
 fprintf("Stage 3 production complete: %d sections, %d reconstructed planes.\n", ...
     numel(sections), height(manifest));
+fprintf("Outputs: %s\n\n", stageDir);
+end
+
+function [manifest, stageDir] = runDownsamplingStage( ...
+        reconstructionManifest, datasetIndex, cfg, repoRoot, overwrite)
+% Resample each final channel series into one compact registration volume.
+stageDir = stpt.prepareStageDirectory( ...
+    cfg.paths.outputRoot, "04_downsampling", overwrite);
+
+diary(fullfile(stageDir, "stage.log"));
+diaryCleanup = onCleanup(@() diary("off"));
+provenance = stpt.captureProvenance(repoRoot);
+logRunHeader(cfg, provenance, "Stage 4: downsampling", stageDir);
+
+save(fullfile(stageDir, "resolved_config.mat"), "cfg", "provenance");
+stpt.writeProvenance(provenance, fullfile(stageDir, "provenance.txt"));
+
+manifest = stpt.downsampling.processChannels( ...
+    reconstructionManifest, datasetIndex, cfg, stageDir);
+stpt.writeTableAtomic(manifest, fullfile(stageDir, "manifest.csv"));
+stpt.downsampling.writeSummary( ...
+    manifest, fullfile(stageDir, "downsampling_summary.txt"));
+
+writelines("Downsampling completed " + string(datetime("now")), ...
+    fullfile(stageDir, "stage_complete.txt"));
+fprintf("Stage 4 complete: %d channel volumes.\n", height(manifest));
 fprintf("Outputs: %s\n\n", stageDir);
 end
 

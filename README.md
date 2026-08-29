@@ -70,6 +70,19 @@ at `cfg.sampling.qcSections` using one fixed display range per channel and plots
 the z-gain percentile trend across the complete volume. It does not run pilot
 comparisons or retain full gain fields.
 
+Stage 4 adapts the completed production manifest to one ordered plane series
+per channel by sorting physical section first and optical layer second. It then
+resamples every channel with an explicit separable calculation: bicubic,
+antialiased XY resizing is applied to each final mosaic, followed by bicubic,
+antialiased z resizing through the reduced YZ slices. The intermediate volume
+is single precision and remains in RAM; uint16 rounding and saturation occur
+once, when the final lossless LZW multipage TIFF is written. The default
+`[z,y,x]` voxel change is `[25,1,1]` to `[25,25,25]` um, producing a
+600-by-508-by-396 volume for this dataset without a z interpolation pass.
+Requested and realized voxel sizes are both recorded because integer output
+dimensions can make them differ slightly. Central XY, XZ, and YZ sections
+provide compact full-volume QC.
+
 The optional `cfg.qc.comparisons.reconstructionSteps` flag independently
 reconstructs four versions of every pilot channel/layer plane: no correction
 with overwrite, XY correction with overwrite, XY correction with Fiji-style
@@ -103,6 +116,15 @@ To run production without running the pilot:
 ```matlab
 cfg = config_260812_MikeZ_PO431109_F_01();
 cfg.execution.stopAfter = "reconstructionProduction";
+runStptReconstruction(cfg);
+```
+
+To load the completed production reconstruction and write the downsampled
+channel volumes:
+
+```matlab
+cfg = config_260812_MikeZ_PO431109_F_01();
+cfg.execution.stopAfter = "downsampling";
 runStptReconstruction(cfg);
 ```
 
@@ -148,15 +170,16 @@ runStptReconstruction(cfg);
 ```
 
 The experiment config currently stops after the Stage 3 reconstruction pilot.
-The Stage 3 terminal names are `reconstructionPilot` and
-`reconstructionProduction`. Tissue
+The later terminal names are `reconstructionPilot`, `reconstructionProduction`,
+and `downsampling`. Tissue
 selection is stored under `02_illumination/tissue_otsu/01_selection`; the fitted
 model is stored under `02_illumination/tissue_otsu/02_model`; canonical pilot
 planes and QC are stored under `03_reconstruction/pilot`. Neither Stage 2
 substep writes corrected TIFFs. The optional StitchIt-reference model uses the
 parallel path `02_illumination/stitchit_reference/02_model`. Production planes,
 manifest, summary, and minimal QC are stored under
-`03_reconstruction/production`.
+`03_reconstruction/production`. Downsampled channel volumes, their manifest,
+summary, and orthogonal QC are stored under `04_downsampling`.
 
 ## Code organization
 
@@ -173,6 +196,8 @@ The package is divided by responsibility:
 | `stpt.fusion` | Compute target-grid geometry, prepare native tiles, and dispatch overwrite or Fiji-style mosaic fusion. |
 | `stpt.zillumination` | Apply the shared within-section optical-layer interface and StitchIt smooth-ratio correction. |
 | `stpt.reconstruction` | Group fused layers by section/channel, apply z correction, publish final TIFFs and manifests, record provenance, and generate pilot or production QC. |
+| `stpt.resampling` | Resample an ordered TIFF series with the generic single-precision XY-first, z-second calculation. |
+| `stpt.downsampling` | Adapt the production manifest to ordered channel series, publish compact multipage volumes, and write Stage 4 QC. |
 
 The master runner owns stage order and derived-output directories; scientific
 algorithms do not rename or reorganize raw files.
@@ -205,6 +230,7 @@ StitchIt source reference: `383b9fbd5f0664bf232c897a87759d8da43b725c`
 | `stpt.zillumination.stitchitSmoothRatio` | `+stitchit/+artifactCorrection/correctZilluminationInDirectory.m` | Close port of the reduced-resolution broad Gaussian and reference/target ratio; omits StitchIt's directory parsing, overwrite behavior, parallel pool logic, and uncompressed writer. |
 | `stpt.reconstruction.writePilotQC` | `stitcher.m` chessboard mode (concept only) | Independent final center-section previews, channel overlay, and lightweight red/green tile checkerboard. |
 | `stpt.reconstruction.writeProductionQC` | None | Independent fixed-scale representative sections, manifest-based z-gain trends, and production summary. |
+| `stpt.resampling.resampleVolume` | `stitchedStackManipulation/resampleVolume.m` | Preserves StitchIt's XY-first and z-second bicubic organization, while accepting an explicit file list and voxel vectors, using single precision, recording realized spacing, and omitting the already completed z-illumination correction. |
 
 Shared interface functions contain no StitchIt estimation logic:
 
@@ -218,6 +244,8 @@ Shared interface functions contain no StitchIt estimation logic:
 | `stpt.zillumination.apply` | Apply the configured method to all optical layers from one physical section/channel; treat one layer as identity. |
 | `stpt.reconstruction.processSections` | Fuse complete section/channel layer groups, apply z illumination in memory, and publish only final planes plus their manifest. |
 | `stpt.reconstruction.writeReconstructionStepComparison` | Independently reconstruct the four ordered correction/blending/z-correction variants and assemble matched visual QC. |
+| `stpt.downsampling.buildPlaneList` | Sort one channel by physical section and optical layer and require a complete final-plane series. |
+| `stpt.resampling.resampleVolume` | Convert an ordered TIFF list plus input/output `[z,y,x]` voxel sizes to one single-precision `[y,x,z]` volume. |
 
 In `pool` mode, one correction is stored identically in both slots of the common
 model interface and is therefore applied to every tile row. In optional `split`
@@ -234,7 +262,12 @@ places an 802-pixel retained tile at `floor(0.88 * 802) = 705` pixels. This
 pipeline keeps the crop, normalized Fiji weight formula, and lossless LZW final
 output, but applies correction in memory and uses the recorded 700-pixel target
 step. Fiji blending is the canonical fusion mode; reverse-order overwrite is
-retained only for the two controlled pilot comparisons. Production downsampling
-will remain a separate final stage.
+retained only for the two controlled pilot comparisons. As in OpenSTP and
+StitchIt, downsampling is a separate final operation rather than part of fusion.
+The recorded 700-pixel placement gives a 508-by-396 XY lattice at 25 um; the
+legacy OpenSTP warping volumes are 512-by-399 because their 705-pixel placement
+produces a slightly larger stitched field of view.
 
-Planned extensions are separate final downsampling and plane-level parallelism.
+The remaining planned performance extension is section-level reconstruction
+parallelism; downsampling remains serial because its runtime and memory cost are
+already modest at registration resolution.
