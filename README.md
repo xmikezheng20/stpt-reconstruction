@@ -1,298 +1,379 @@
 # stpt-reconstruction
 
-A lightweight MATLAB pipeline for reconstructing native TissueCyte-style STPT datasets using illumination correction and stitching algorithms from StitchIt.
+A lightweight MATLAB pipeline for reconstructing native TissueCyte-style STPT
+datasets using illumination correction and stitching algorithms from StitchIt.
 
-The motivation is to provide a small, auditable bridge from the native
-OpenSTP/TissueCyte acquisition layout used by our microscope to StitchIt's
-offline reconstruction algorithms, without adopting the full BakingTray
-acquisition workflow or repackaging the raw TIFFs.
+The pipeline bridges the native OpenSTP/TissueCyte file layout used by our
+microscope to a small offline reconstruction workflow. It does not use
+BakingTray acquisition, StitchIt sync/crunch, or repackaged multipage raw
+stacks. Native TIFFs and Mosaic metadata are read in place and never modified;
+all derived products go under `processed/reconstruction`.
 
-The pipeline reads the native TIFF and Mosaic files in place and writes every
-derived artifact under the experiment's `processed/reconstruction` directory.
-Raw acquisition files are never renamed or rewritten.
+## Production workflow
 
-## Implemented stages
+For this development dataset, two standalone configs coexist:
 
-Stage 1 builds and validates the requested dataset index. It parses acquisition
-metadata, maps each TIFF to section/layer/tile/channel coordinates, reconstructs
-the commanded 14-by-18 scan grid, and writes auditable tables and QC plots. The
-default range is the complete planned acquisition, but an explicit start/stop
-range can exclude an incomplete acquisition tail.
+- `config_260812_MikeZ_PO431109_F_01.m` is the comprehensive experimental
+  version. It exposes alternative algorithms and defaults to the reconstruction
+  pilot.
+- `config_260812_MikeZ_PO431109_F_01_production.m` is the concise production
+  version. It contains only active settings, uses four reconstruction workers,
+  and runs through downsampling.
 
-Stage 2 estimates illumination on regularly sampled sections. The default
-`tissueOtsu` method pools cropped green-tile means, applies one binary Otsu
-threshold to `log(1 + mean)`, and records the resulting physical tile mask. It
-then directly pools the selected locations across sections to fit odd/even
-illumination templates for each channel and layer. By default, their
-count-weighted pooled field supplies one correction for all tile rows; `split`
-remains available when odd/even scan directions differ materially. The
-estimator uses a 10% pixelwise trimmed mean, zero additive offset, and StitchIt's
-median-normalized gain construction. It does not write corrected TIFFs or
-perform stitching.
+The `_production` suffix is only needed here to keep both versions together.
+For a new routinely acquired brain, copy the concise repository template into
+the experiment directory and give it the ordinary dataset name:
 
-For auditability, Stage 2 retains separate selection and model subdirectories,
-but the master runner executes them as one operational stage. The optional
-`stitchitReference` method remains available as a detector-floor baseline; its
-retained tiles are not a tissue classification.
-
-Illumination fitting is method-specific, but every method returns the same cropped
-offset-and-gain model. `fitModel` dispatches fitting, `validateModel` enforces the
-model contract, and `applyModel` applies the clear pointwise calculation
-`(croppedRaw - offset) .* gain`. Green/ch2 is the configurable tissue-reference
-channel for `tissueOtsu`; the optional StitchIt-reference method does not use
-tissue classification.
-
-Stage 3 provides independent pilot and production targets through the same
-section-level worker. The pilot reconstructs the section at the center of the
-configured processing range; production reconstructs every requested section.
-Both stream native tiles, apply crop and illumination correction in raw
-orientation, rotate each corrected tile 90 degrees clockwise to match the
-target-stage axes, and place retained
-802-by-802 tiles at the recorded 700-pixel target step. This explicit transform
-reproduces OpenSTP's `fliplr(image')`; no final mosaic transform is applied.
-Overlapping corrected tiles are combined with OpenSTP's Fiji-style normalized
-distance weights using `alpha=1.5`. The four channel/layer planes are canonical
-uint16 TIFFs with lossless LZW compression; no corrected tile intermediates are
-made. After fusion, deeper optical layers are matched to the broadly smoothed
-first layer using StitchIt's spatial-ratio z-illumination correction. All layers
-of one physical section/channel are processed together, and only final
-z-corrected TIFFs are written. A one-layer acquisition passes through unchanged.
-
-The pilot and production reconstruction share the same geometry, plane
-fusion, TIFF writer, and manifest schema. They intentionally use independent
-output trees: the pilot is a small validation product, not partial production
-output. Production can therefore begin from one unambiguous clean stage after
-the pilot settings have been accepted.
-
-Production dispatches complete physical sections with
-`cfg.execution.reconstructionWorkers`; the supplied production config uses four
-local process workers. Each worker still handles all channels and optical layers
-of its section, so z correction remains a section-local operation. The pilot is
-one section and therefore runs serially. Parallel scheduling is absent from the
-scientific signature and published manifest order, and a failed production stage
-is discarded and rerun in full rather than resumed section by section.
-
-Production writes only canonical final TIFFs under
-`03_reconstruction/production/stitched`. Minimal QC reads the published TIFFs
-at `cfg.sampling.qcSections` using one fixed display range per channel and plots
-the z-gain percentile trend across the complete volume. It does not run pilot
-comparisons or retain full gain fields.
-
-Stage 4 adapts the completed production manifest to one ordered plane series
-per channel by sorting physical section first and optical layer second. It then
-resamples every channel with an explicit separable calculation: bicubic,
-antialiased XY resizing is applied to each final mosaic, followed by bicubic,
-antialiased z resizing through the reduced YZ slices. The intermediate volume
-is single precision and remains in RAM; uint16 rounding and saturation occur
-once, when the final lossless LZW multipage TIFF is written. The default
-`[z,y,x]` voxel change is `[25,1,1]` to `[25,25,25]` um, producing a
-600-by-508-by-396 volume for this dataset without a z interpolation pass.
-Requested and realized voxel sizes are both recorded because integer output
-dimensions can make them differ slightly. Central XY, XZ, and YZ sections
-provide compact full-volume QC.
-
-The optional `cfg.qc.comparisons.reconstructionSteps` flag independently
-reconstructs four versions of every pilot channel/layer plane: no correction
-with overwrite, XY correction with overwrite, XY correction with Fiji-style
-blending, and the complete XY-corrected/Fiji-blended/z-corrected result. All four
-use the same crop, model-application interface, tile orientation, section
-processor, and lossless writer. Full-resolution TIFFs, a combined manifest, a
-complete-field overview, native-resolution junctions, and z-gain fields are
-kept together under
-`03_reconstruction/pilot/qc/comparisons/reconstruction_steps`.
-Comparison variants are never copied from or linked to canonical output.
-
-Fiji blending follows OpenSTP's `fusionMethod=3`: each corrected tile is
-weighted by `((dx+1)*(dy+1)+1)^alpha`, accumulated on the recorded target grid,
-and divided by the accumulated weights. The current `alpha=1.5` matches
-OpenSTP. The common weight image is scaled to a maximum of one before
-single-precision accumulation; this global scale cancels exactly in the
-normalized result. Clipping and uint16 conversion happen only after blending.
-
-The comprehensive experiment config exposes every scientific and QC decision
-and defaults to the center-section development pilot:
-
-```matlab
-addpath('config');
-runStptReconstruction(config_260812_MikeZ_PO431109_F_01());
+```bash
+cp config/config_260812_MikeZ_PO431109_F_01_production.m \
+  /path/to/experiment/config_YYMMDD_Experiment_Name.m
 ```
 
-Routine production uses a separate, deliberately concise standalone config. It
-contains the accepted active algorithms, selects four workers, and runs through
-the final downsampling stage:
+Change the function declaration inside the copied file to match its filename:
 
 ```matlab
-addpath('config');
-runStptReconstruction(config_260812_MikeZ_PO431109_F_01_production());
+function cfg = config_YYMMDD_Experiment_Name()
 ```
 
-The production file is intended to be copied for each standard dataset and then
-edited directly: update paths and channels, verify the section range and major
-acquisition geometry, and adjust an active algorithm parameter only when needed.
-The comprehensive config remains an independent experimental version with
-additional alternatives and explanatory context. There is no config inheritance
-or hidden defaults between them. The master runner builds absent prerequisites
-and then runs production reconstruction and downsampling; a pilot is never a
-production prerequisite.
+That unsuffixed file beside the experiment data is then the dataset's only
+production config. From the repository root, add the experiment directory—not
+the repository's template directory—to the MATLAB path:
 
-To run production without running the pilot:
+```bash
+cd /home/xizheng/Projects/stpt-reconstruction
+
+matlab -batch "addpath('/path/to/experiment'); runStptReconstruction(config_YYMMDD_Experiment_Name());"
+```
+
+The master runner validates the config, builds missing Stage 1/2 prerequisites,
+reconstructs the production volume, and downsamples it. The reconstruction
+pilot is independent and is never a production prerequisite.
+
+For the current dataset, whose two configs still coexist, the equivalent command
+is:
+
+```bash
+matlab -batch "addpath('config'); runStptReconstruction(config_260812_MikeZ_PO431109_F_01_production());"
+```
+
+## New-dataset checklist
+
+Before starting a standard production run, copy the concise config into the
+experiment directory and verify these fields against the acquisition and Mosaic
+metadata:
+
+1. Dataset identity
+
+   - `cfg.experiment.id`
+   - `cfg.experiment.dataPrefix`
+   - `cfg.paths.rawRoot`
+   - `cfg.paths.outputRoot`
+
+2. Channel mapping
+
+   - One entry for every channel that physically exists
+   - Correct channel ID, color/name, directory, and filename code
+   - No deleted or empty channel such as the absent blue channel in this dataset
+
+3. Acquisition extent
+
+   - Planned `sectionCount`
+   - Actual complete `sectionStart:sectionStop`
+   - `layersPerSection`
+   - Physical `planeSpacingUm`
+
+4. XY acquisition geometry
+
+   - `pixelSizeUm`
+   - `tileSizePixels`
+   - `gridSize`
+   - Recorded `targetStepUm`
+   - Symmetric `cropPixels`
+   - Native-to-grid `tileOrientation`
+
+5. Reconstruction policy
+
+   - Green or another appropriate tissue-reference channel
+   - Illumination and QC section intervals
+   - Fiji blending and z correction enabled as intended
+   - One-layer acquisitions use `layersPerSection = 1`; z correction then becomes
+     an identity operation automatically
+
+6. Output and execution
+
+   - Desired `[z,y,x]` downsampled voxel size
+   - Available `reconstructionWorkers`; four is validated on this machine
+   - `overwrite = false` for the first run
+
+The config can be checked without creating output:
+
+```bash
+matlab -batch "addpath('src','/path/to/experiment'); stpt.validateConfig(config_YYMMDD_Experiment_Name());"
+```
+
+## Pipeline stages and mathematics
+
+### Stage 1: native-data index
+
+Stage 1 parses the Mosaic metadata and maps every native TIFF to explicit
+section, optical-layer, tile, and channel coordinates. It reconstructs the
+commanded tile grid, checks the config against the recorded acquisition, and
+writes inventories plus representative target-versus-actual position plots.
+
+The configured processing range may be shorter than the planned acquisition.
+For example, an acquisition planned for 300 sections but stopped early can use
+only a known-complete prefix such as sections 1–260. Every requested section
+must still be complete in every configured channel.
+
+### Stage 2: XY illumination model
+
+The production `tissueOtsu` method samples sections regularly across the
+requested volume. For every cropped green tile, it computes a scalar mean and
+applies one binary Otsu threshold to
+
+```text
+log(1 + tile mean).
+```
+
+Tiles above the global threshold are retained as tissue-bearing observations.
+Selected tile locations are then pooled directly across sampled sections. A 10%
+pixelwise trimmed mean estimates a template for every channel, optical layer,
+and scan-row parity.
+
+With the default `rowMode = "pool"`, odd/even templates are combined by their
+observation counts and one correction is applied to every tile row. Given
+template `T`, the zero-offset multiplicative model is
+
+```text
+D = 0
+G = median(T) / T
+corrected = (cropped raw - D) .* G.
+```
+
+The common model interface also supports `rowMode = "split"` and the retained
+`stitchitReference` estimator in the comprehensive config. Stage 2 writes the
+selection and fitted model as separate auditable checkpoints, but it writes no
+corrected TIFF tiles.
+
+### Stage 3: reconstruction
+
+Each raw 832-by-832 tile is corrected in its native orientation, cropped by 15
+pixels per side, and rotated 90 degrees clockwise to reproduce OpenSTP's
+`fliplr(image')` mapping to target-stage axes. The retained support is 802 by
+802 pixels.
+
+Tiles are placed at the recorded 700-pixel target step. Therefore the overlap is
+derived from the acquisition geometry rather than specified independently:
+
+```text
+overlap = 802 - 700 = 102 pixels
+overlap fraction of retained support = 102 / 802 = 12.72%.
+```
+
+Fiji-style fusion assigns each retained tile the separable distance-to-edge
+weight
+
+```text
+w(x,y) = ((dx + 1) * (dy + 1) + 1)^alpha,
+alpha = 1.5,
+```
+
+and evaluates the normalized weighted mosaic
+
+```text
+fused(x,y) = sum_i(w_i * corrected_i) / sum_i(w_i).
+```
+
+The common weight image is divided by its maximum before accumulation. That
+global scale cancels between numerator and denominator and does not alter the
+result. Clipping and uint16 conversion occur only after fusion.
+
+For multi-layer sections, the deeper fused layers are corrected against the
+first layer before any final TIFF is published. The StitchIt smooth-ratio method
+reduces the fused planes, broadly Gaussian-smooths the reference and target,
+and applies their spatial ratio as a multiplicative gain. A one-layer dataset
+passes through this interface unchanged.
+
+The complete physical section is the parallel work unit: all channels and
+optical layers needed by that section remain together. Production uses
+`cfg.execution.reconstructionWorkers`; the current value of four produced
+byte-identical output to serial reconstruction. Only final z-corrected uint16
+LZW TIFFs are written—there are no cropped-tile, corrected-tile, or pre-z TIFF
+trees.
+
+### Stage 4: downsampling
+
+The completed production manifest is sorted by physical section and then
+optical layer to make one ordered series per channel. Resampling is separable:
+
+1. Each native XY mosaic is resized with bicubic interpolation and antialiasing.
+2. If needed, the already reduced volume is resized through YZ slices using the
+   same bicubic/antialiased calculation.
+
+The intermediate array is single precision and held in RAM. Rounding,
+saturation, and conversion to uint16 happen once at the final lossless-LZW TIFF
+write. Requested and realized voxel sizes are both recorded because integer
+output dimensions can introduce a small spacing difference.
+
+For this dataset, `[z,y,x]` changes from `[25,1,1]` to `[25,25,25]` µm. The
+output is 600 by 508 by 396 voxels; z already has the requested spacing and is
+not interpolated.
+
+## Stage-by-stage comparison
+
+The three pipelines share the same broad scientific sequence but differ in data
+adapters, parameter estimation, intermediate storage, and defaults.
+
+| Major step | This repository | OpenSTP reference pipeline | StitchIt/BakingTray |
+| --- | --- | --- | --- |
+| Input organization | Reads native per-channel TissueCyte TIFF roots and Mosaic metadata in place. | Native TissueCyte-specific filenames and Mosaic parsing. | Expects BakingTray acquisition metadata and multipage tile stacks; sync/crunch belong to the acquisition workflow. |
+| Indexing | Explicit read-only table maps every file to section/layer/tile/channel coordinates. | TissueCyte indexing is embedded in the legacy reconstruction scripts and compiled helpers. | Directory and INI conventions encode acquisition geometry. |
+| Tissue/empty-tile selection | Green-channel global log-Otsu removes complete background before template estimation. | Current reference estimator averages all tiles and does not reject empty tiles. | Detector-floor and variability rules reject tiles before per-section averages; this is not explicitly a tissue classifier. |
+| XY illumination template | Direct 10% trimmed pooling of selected native tiles across sampled sections; pooled rows by default. | One pooled channel/layer average tile from the available volume. | Per-section odd/even trimmed averages are collated across sections; `pool` is normally sufficient. |
+| XY correction | Explicit `D=0`, median-normalized multiplicative gain, applied in memory. | Pooled average-tile division in the legacy corrected-tile workflow. | Offset/gain correction through `illuminationCorrector` and `divideByImage`. |
+| Crop and orientation | Symmetric 15-pixel crop; correction in raw orientation; explicit 90-degree clockwise tile rotation. | Same 15-pixel crop and `fliplr(image')` orientation. | Crop is acquisition/config driven; BakingTray tiles already follow StitchIt's expected organization. |
+| Placement and overlap | Recorded 700-pixel target step; 102-pixel/12.72% overlap follows from retained support. | Configured 12% rule gives `floor(0.88 * 802) = 705` pixels and a slightly larger field. | Grid/stage positions are converted to pixels; overlap follows tile support and placement. |
+| Fusion | Canonical normalized Fiji-style blending with `alpha=1.5`; reverse overwrite is retained only as a pilot control. | Fiji-style blending with `alpha=1.5`. | Default reverse-acquisition overwrite (`fusionWeight=0`); alternative weighting is available. |
+| Z illumination | StitchIt smooth spatial ratio applied section/channel-wise before publishing final planes. | The current reference warping output retains the layer-2 attenuation. | `correctZilluminationInDirectory` applies the smooth reference/target ratio as a post-fusion operation. |
+| Full-resolution outputs | Only final z-corrected uint16/LZW section TIFFs. | Cropped/corrected tile intermediates plus stitched outputs. | Preprocessed acquisition products and stitched outputs follow the BakingTray directory tree. |
+| Downsampling | Separate final XY-first, z-second bicubic/antialiased resampling with explicit voxel vectors. | Separate bilinear reduction used for the legacy `p05` warping TIFFs. | Separate `resampleVolume` with the same XY-first, z-second bicubic organization. |
+| Execution lifecycle | Completed stages are reusable prerequisites; incomplete stages are discarded and rerun. No plane-level resume state. | Script-driven legacy workflow. | Full acquisition workflow includes its own sync, crunch, preprocessing, and directory markers. |
+
+The target-step difference explains the final XY size difference: this pipeline
+produces 508 by 396 at 25 µm, while the OpenSTP warping volumes are 512 by 399.
+On the reference brain, whole-volume comparisons found median layer-1 Pearson
+correlations of 0.959 in red and 0.983 in green. A matched section-151 control
+with z correction disabled agreed even more closely with OpenSTP in layer 2
+(`r=0.981` red and `r=0.995` green), confirming that the expected production
+layer-2 difference comes from z illumination correction rather than geometry or
+ordering.
+
+## QC, lifecycle, and outputs
+
+Stage checkpoints contain resolved configs, code provenance, logs, manifests,
+summaries, and compact plots. Production QC includes representative final
+sections, z-gain trends, and central orthogonal sections of each downsampled
+channel volume.
+
+The output tree is:
+
+```text
+processed/reconstruction/
+├── 01_index/
+├── 02_illumination/
+│   └── tissue_otsu/
+│       ├── 01_selection/
+│       └── 02_model/
+├── 03_reconstruction/
+│   ├── pilot/                 # optional, independent development product
+│   └── production/
+│       └── stitched/
+└── 04_downsampling/
+    └── volumes/
+```
+
+Completed prerequisite stages are loaded only when their scientific signatures
+match the current config. An incomplete stage directory is disposable and is
+removed before that stage is rerun. A completed requested terminal stage is
+protected unless `cfg.execution.overwrite = true`. Parallel production follows
+the same rule: workers write unique section files, but there are no per-section
+completion markers or resume logic.
+
+To process a complete subset, edit the production config before the first run:
 
 ```matlab
-cfg = config_260812_MikeZ_PO431109_F_01_production();
+cfg.processing.sectionStart = 1;
+cfg.processing.sectionStop = 260;
+```
+
+To intentionally replace only a completed downsampling stage:
+
+```matlab
+cfg = config_YYMMDD_Experiment_Name();
+cfg.execution.overwrite = true;
+runStptReconstruction(cfg);
+```
+
+To stop at production reconstruction without downsampling:
+
+```matlab
+cfg = config_YYMMDD_Experiment_Name();
 cfg.execution.stopAfter = "reconstructionProduction";
 runStptReconstruction(cfg);
 ```
 
-To load the completed production reconstruction and write the downsampled
-channel volumes:
+## Development and pilot workflow
 
-```matlab
-runStptReconstruction(config_260812_MikeZ_PO431109_F_01_production());
+The comprehensive example config defaults to a single center-section pilot:
+
+```bash
+matlab -batch "addpath('config'); runStptReconstruction(config_260812_MikeZ_PO431109_F_01());"
 ```
 
-Computation and visualization have independent regular samples. With
-`illuminationEveryNSections = 10`, Stage 2 fitting uses sections
-`1, 11, ..., 291`; with `qcEveryNSections = 50`, Stage 1/2 plots use
-`1, 51, 101, 151, 201, 251`. Final sections are not appended automatically.
-The reconstruction pilot section is
-`round((sectionStart + sectionStop)/2)`, which is
-section 151 for the default 1:300 range. Production uses the same every-50
-sequence for compact final-volume QC.
+Its optional `cfg.qc.comparisons.reconstructionSteps = true` reconstructs four
+matched full-resolution conditions for every pilot channel and layer:
 
-The planned metadata count remains `cfg.acquisition.sectionCount`. To process
-only a complete prefix or subset, override the reconstruction range explicitly:
+1. No XY illumination correction, overwrite fusion
+2. XY correction, overwrite fusion
+3. XY correction, Fiji blending
+4. XY correction, Fiji blending, z illumination correction
 
-```matlab
-cfg = config_260812_MikeZ_PO431109_F_01_production();
-cfg.processing.sectionStart = 1;
-cfg.processing.sectionStop = 260;
-runStptReconstruction(cfg);
-```
-
-Sections outside this range are ignored. Every requested section must still be
-complete and present in every configured channel.
-
-Completed scientific stages may be loaded as prerequisites. Incomplete stage
-directories are disposable and are removed before that stage is rerun from the
-beginning; there is no plane-level resume or recovery state. A completed
-requested stage remains protected from accidental replacement. Set
-`cfg.execution.overwrite = true` to remove and intentionally rerun that complete
-terminal stage. When the tissue-Otsu model is requested and its completed
-selection checkpoint is absent, the master runner builds that prerequisite
-first. A completed illumination model is reused only when its training sample,
-QC sample, crop, row mode, and selected estimator parameters match the current
-configuration. Parallel production follows the same rule: workers write unique
-section files, but there are no per-section completion markers or resume logic.
-
-To stop after Stage 1:
-
-```matlab
-cfg = config_260812_MikeZ_PO431109_F_01();
-cfg.execution.stopAfter = "index";
-runStptReconstruction(cfg);
-```
-
-The comprehensive experiment config stops after the Stage 3 reconstruction
-pilot with one worker; the production config stops after downsampling with four
-workers. The terminal names are `reconstructionPilot`,
-`reconstructionProduction`, and `downsampling`. Tissue
-selection is stored under `02_illumination/tissue_otsu/01_selection`; the fitted
-model is stored under `02_illumination/tissue_otsu/02_model`; canonical pilot
-planes and QC are stored under `03_reconstruction/pilot`. Neither Stage 2
-substep writes corrected TIFFs. The optional StitchIt-reference model uses the
-parallel path `02_illumination/stitchit_reference/02_model`. Production planes,
-manifest, summary, and minimal QC are stored under
-`03_reconstruction/production`. Downsampled channel volumes, their manifest,
-summary, and orthogonal QC are stored under `04_downsampling`.
+These comparison files live together under
+`03_reconstruction/pilot/qc/comparisons/reconstruction_steps` and are never
+copied into production. Other development terminal stages are `index`,
+`illuminationSelection`, `illuminationModel`, `reconstructionPilot`,
+`reconstructionProduction`, and `downsampling`.
 
 ## Code organization
 
-The package is divided by responsibility:
-
 | Package | Responsibility |
 | --- | --- |
-| `stpt.io` | Parse native Mosaic files, resolve indexed TIFF paths, and load individual tiles or tile stacks. |
-| `stpt.index` | Build the read-only dataset index and write Stage 1 QC. |
-| `stpt.illumination` | Define the shared fit, validation, and correction-model interface. |
-| `stpt.illumination.stitchitReference` | Implement only the StitchIt-reference estimation algorithm and its QC. |
-| `stpt.illumination.tissueOtsu` | Select tissue-bearing tiles with green-channel log-Otsu and fit direct pooled templates. |
-| `stpt.preprocessing` | Apply the explicit native-TIFF-to-target-grid tile orientation after illumination correction. |
-| `stpt.fusion` | Compute target-grid geometry, prepare native tiles, and dispatch overwrite or Fiji-style mosaic fusion. |
-| `stpt.zillumination` | Apply the shared within-section optical-layer interface and StitchIt smooth-ratio correction. |
-| `stpt.reconstruction` | Process complete physical sections, dispatch production serially or in parallel, apply z correction, publish final TIFFs and manifests, and generate pilot or production QC. |
-| `stpt.resampling` | Resample an ordered TIFF series with the generic single-precision XY-first, z-second calculation. |
-| `stpt.downsampling` | Adapt the production manifest to ordered channel series, publish compact multipage volumes, and write Stage 4 QC. |
+| `stpt.io` | Parse Mosaic metadata, resolve native paths, and load tiles or tile stacks. |
+| `stpt.index` | Build and validate the read-only native-data index. |
+| `stpt.illumination` | Define the common fit, model validation, and application interfaces. |
+| `stpt.illumination.tissueOtsu` | Select tissue-bearing observations and estimate direct pooled templates. |
+| `stpt.illumination.stitchitReference` | Retain the StitchIt-style detector-floor/reference estimator for controlled comparisons. |
+| `stpt.preprocessing` | Apply the explicit native-TIFF-to-target-grid tile orientation. |
+| `stpt.fusion` | Compute placement geometry and implement overwrite or Fiji-style fusion. |
+| `stpt.zillumination` | Apply the within-section optical-layer correction interface. |
+| `stpt.reconstruction` | Process complete sections, dispatch serial/parallel production, publish TIFFs, and write QC. |
+| `stpt.resampling` | Perform the generic single-precision XY-first, z-second resampling calculation. |
+| `stpt.downsampling` | Adapt the production manifest, publish channel volumes, and write Stage 4 QC. |
 
-The master runner owns stage order and derived-output directories; scientific
-algorithms do not rename or reorganize raw files.
+The master runner owns stage order and derived-output directories. Scientific
+functions never rename, reorganize, or write into the raw acquisition roots.
 
-## Relationship to StitchIt
+## Algorithm provenance
 
-This repository has no runtime dependency on StitchIt and never calls a
-`stitchit.*` function. The reference snapshot below identifies the historical
-source of adapted algorithms; the local repository commit remains the executable
-runtime provenance.
+This repository has no runtime dependency on StitchIt and calls no
+`stitchit.*` function. The StitchIt source snapshot used as a numerical
+reference is:
 
-StitchIt source reference: `383b9fbd5f0664bf232c897a87759d8da43b725c`
+```text
+383b9fbd5f0664bf232c897a87759d8da43b725c
+```
 
-| Local function | StitchIt source | Relationship and deviations |
+| Local implementation | Reference source | Relationship |
 | --- | --- | --- |
-| `stpt.io.loadTileStack` | `stitching/tileLoad.m` | Independent native-TissueCyte loader; no BakingTray, INI, or multipage-stack assumptions. |
-| `stitchitReference.estimateFloorTileMask` | `preProcessTiles/private/writeTileStats.m` | Adapted detector-floor calculation; exposes the conservative fallback and does not interpret retained tiles as tissue. |
-| `stitchitReference.estimateSectionAverage` | `preProcessTiles/private/calcAverageMatFiles.m` | Close port of rejection, row-parity splitting, and per-section trimmed means; adds post-rejection guards and omits unused 1,000-bin histograms. |
-| `stitchitReference.collateSectionAverages` | `stitching/collateAverageImages.m` | Close port of the 10% across-section trimmed means for odd/even rows. |
-| `stitchitReference.fit` | `+stitchit/+tileload/illuminationCorrector.m`, `+stitchit/+tools/divideByImage.m` | Preserves median-normalized gain on retained pixels and emits the shared cropped model; reference offset remains zero. |
-| `stitchitReference.writeQC` | None | Independent method-specific diagnostic plots and tables. |
-| `tissueOtsu.classifyTiles` | None | Independent method: one global binary Otsu threshold on cropped green-tile log means. |
-| `tissueOtsu.writeQC` | None | Independent selection tables, histogram, and spatial tile maps. |
-| `tissueOtsu.estimateTemplate` | None | Independent direct 10% trimmed mean across selected tiles; no within-section averages. |
-| `tissueOtsu.fit` | None | Reuses the completed selection and assembles all channel/layer/parity templates. |
-| `stpt.fusion.computeGeometry` | `stitching/gridPos2Pixels.m`, `utils/stagePos2PixelPos.m` | Independent target-grid implementation using the indexed 700-pixel commands; overlap is derived from retained support. |
-| `stpt.preprocessing.applyTileOrientation` | OpenSTP `readSectionParamFile3D.m` | Reproduces `fliplr(image')` as an explicit 90-degree clockwise turn after raw-orientation illumination correction. |
-| `stpt.fusion.fuseOverwritePlane` | `stitching/stitcher.m` | Adapts reverse-acquisition, last-tile-wins overwrite; omits BakingTray auto-ROI and marker values. |
-| `stpt.fusion.fuseFijiBlendPlane` | OpenSTP `stitchMosaic.c`, `calcWeightImageAsInFiji.m` | Implements normalized Fiji-style distance weighting on our recorded target-grid placement; uses normalized single-precision weights and blockwise final casting. |
-| `stpt.zillumination.stitchitSmoothRatio` | `+stitchit/+artifactCorrection/correctZilluminationInDirectory.m` | Close port of the reduced-resolution broad Gaussian and reference/target ratio; omits StitchIt's directory parsing, overwrite behavior, parallel pool logic, and uncompressed writer. |
-| `stpt.reconstruction.writePilotQC` | `stitcher.m` chessboard mode (concept only) | Independent final center-section previews, channel overlay, and lightweight red/green tile checkerboard. |
-| `stpt.reconstruction.writeProductionQC` | None | Independent fixed-scale representative sections, manifest-based z-gain trends, and production summary. |
-| `stpt.resampling.resampleVolume` | `stitchedStackManipulation/resampleVolume.m` | Preserves StitchIt's XY-first and z-second bicubic organization, while accepting an explicit file list and voxel vectors, using single precision, recording realized spacing, and omitting the already completed z-illumination correction. |
+| `stitchitReference.estimateFloorTileMask` | `preProcessTiles/private/writeTileStats.m` | Adapted detector-floor calculation. |
+| `stitchitReference.estimateSectionAverage` | `preProcessTiles/private/calcAverageMatFiles.m` | Close port of rejection, parity splitting, and within-section trimmed averages. |
+| `stitchitReference.collateSectionAverages` | `stitching/collateAverageImages.m` | Close port of across-section trimmed collation. |
+| `stpt.illumination.buildModelFromTemplates` | `tileload/illuminationCorrector.m`, `tools/divideByImage.m` | Preserves median-normalized multiplicative gain construction. |
+| `stpt.fusion.fuseOverwritePlane` | `stitching/stitcher.m` | Adapts reverse-acquisition last-tile-wins overwrite. |
+| `stpt.zillumination.stitchitSmoothRatio` | `artifactCorrection/correctZilluminationInDirectory.m` | Close port of reduced broad smoothing and reference/target gain. |
+| `stpt.resampling.resampleVolume` | `stitchedStackManipulation/resampleVolume.m` | Preserves XY-first, z-second bicubic organization. |
+| `stpt.preprocessing.applyTileOrientation` | OpenSTP `readSectionParamFile3D.m` | Reproduces `fliplr(image')`. |
+| `stpt.fusion.fuseFijiBlendPlane` | OpenSTP `stitchMosaic.c`, `calcWeightImageAsInFiji.m` | Implements the same normalized Fiji-style weighting on recorded target placement. |
+| `tissueOtsu.*` | Independent | Adds green-channel log-Otsu tissue selection and direct cross-volume pooling. |
 
-Shared interface functions contain no StitchIt estimation logic:
+## Tests
 
-| Function | Contract |
-| --- | --- |
-| `stpt.illumination.fitModel` | Dispatch the configured method and return `model` plus `audit`. |
-| `stpt.illumination.buildModelFromTemplates` | Apply the shared crop, zero offset, median normalization, and pooled-or-split gain construction. |
-| `stpt.illumination.validateModel` | Require complete channel/layer coverage and finite positive cropped gains. |
-| `stpt.illumination.applyModel` | Crop, subtract the selected offset, and multiply by the model gain; return `single` without hidden clipping or casting. |
-| `stpt.illumination.identityModel` | Preserve the model contract while replacing every offset and gain with `D=0` and `G=1` for crop-only comparisons. |
-| `stpt.zillumination.apply` | Apply the configured method to all optical layers from one physical section/channel; treat one layer as identity. |
-| `stpt.reconstruction.processSection` | Fuse every channel/layer group in one physical section, apply z illumination in memory, and publish only final planes. |
-| `stpt.reconstruction.processSections` | Dispatch the same section worker serially or in parallel and assemble one canonically ordered manifest. |
-| `stpt.reconstruction.writeReconstructionStepComparison` | Independently reconstruct the four ordered correction/blending/z-correction variants and assemble matched visual QC. |
-| `stpt.downsampling.buildPlaneList` | Sort one channel by physical section and optical layer and require a complete final-plane series. |
-| `stpt.resampling.resampleVolume` | Convert an ordered TIFF list plus input/output `[z,y,x]` voxel sizes to one single-precision `[y,x,z]` volume. |
+Run the repository tests from its root:
 
-In `pool` mode, one correction is stored identically in both slots of the common
-model interface and is therefore applied to every tile row. In optional `split`
-mode, odd/even fields refer to reconstructed target-grid row parity. In this
-dataset that parity exactly separates the two alternating directions of the
-serpentine acquisition; the group names are otherwise arbitrary.
+```bash
+matlab -batch "addpath('tests'); testZIllumination; testDownsampling;"
+```
 
-## Relationship to OpenSTP
-
-The legacy OpenSTP script crops 15 pixels, writes cropped and corrected tile
-trees, estimates one pooled channel/layer average from all tiles, and defaults
-to Fiji-style weighted blending with `alpha=1.5`. Its configured 12% overlap
-places an 802-pixel retained tile at `floor(0.88 * 802) = 705` pixels. This
-pipeline keeps the crop, normalized Fiji weight formula, and lossless LZW final
-output, but applies correction in memory and uses the recorded 700-pixel target
-step. Fiji blending is the canonical fusion mode; reverse-order overwrite is
-retained only for the two controlled pilot comparisons. As in OpenSTP and
-StitchIt, downsampling is a separate final operation rather than part of fusion.
-The recorded 700-pixel placement gives a 508-by-396 XY lattice at 25 um; the
-legacy OpenSTP warping volumes are 512-by-399 because their 705-pixel placement
-produces a slightly larger stitched field of view.
-
-The remaining planned performance extension is section-level reconstruction
-parallelism; downsampling remains serial because its runtime and memory cost are
-already modest at registration resolution.
+The reference-dataset integration checks additionally established that four
+sections reconstructed with four workers produced 16 TIFFs that were both
+pixel-identical and byte-identical to the validated serial production output.
