@@ -156,6 +156,11 @@ if isPilot || isProduction || isDownsampling
         error("stpt:MissingConfig", ...
             "Stage 3 requires cfg.fusion and cfg.zIllumination.");
     end
+    if ~isfield(cfg.execution, "reconstructionWorkers") || ...
+            ~isPositiveInteger(cfg.execution.reconstructionWorkers)
+        error("stpt:ParallelReconstruction", ...
+            "cfg.execution.reconstructionWorkers must be a positive integer.");
+    end
     requiredFusionFields = ["mode", "compression", "qcPreviewScale"];
     for field = requiredFusionFields
         if ~isfield(cfg.fusion, field)

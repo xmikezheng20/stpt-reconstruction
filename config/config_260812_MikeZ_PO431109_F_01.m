@@ -103,5 +103,6 @@ cfg.qc.comparisons.reconstructionSteps = true;
 % Keep the validated center-section pilot as the default during development.
 % Use "reconstructionProduction" to reconstruct cfg.processing.sections.
 cfg.execution.stopAfter = "reconstructionPilot";
+cfg.execution.reconstructionWorkers = 1;
 cfg.execution.overwrite = false;
 end

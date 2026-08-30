@@ -1,10 +1,10 @@
 function [manifest, diagnostics] = processSections( ...
         datasetIndex, model, cfg, sections, outputRoot)
-%PROCESSSECTIONS Reconstruct complete section/channel optical-layer groups.
+%PROCESSSECTIONS Dispatch complete physical sections for reconstruction.
 %
-% Fusion produces one uint16 mosaic per layer. Z illumination is then corrected
-% across the layers of that physical section and channel before any final TIFF
-% is published. Pilot, comparison, and production runs share this worker.
+% A section is the independent work unit because z illumination couples its
+% optical layers. Serial and parallel execution call the same section worker
+% and therefore differ only in scheduling, never in reconstruction math.
 
 if isfolder(outputRoot)
     error("stpt:ReconstructionOutput", ...
@@ -17,17 +17,10 @@ sections = sections(:)';
 nLayers = datasetIndex.geometry.layersPerSection;
 nChannels = numel(datasetIndex.channels);
 nPlanes = numel(sections) * nLayers * nChannels;
-nSectionChannels = numel(sections) * nChannels;
-rows = repmat(emptyManifestRow(), nPlanes, 1);
 collectDiagnostics = nargout > 1;
-if collectDiagnostics
-    diagnostics = repmat(emptyDiagnostic(), nSectionChannels, 1);
-else
-    diagnostics = struct([]);
-end
-rowNumber = 0;
-diagnosticNumber = 0;
 
+% Create shared channel directories before dispatch. Every section writes a
+% unique filename, so workers never coordinate or mutate common files.
 channelDirectories = strings(nChannels, 1);
 for c = 1:nChannels
     channel = datasetIndex.channels(c);
@@ -36,118 +29,76 @@ for c = 1:nChannels
     mkdir(channelDirectories(c));
 end
 
+requestedWorkers = cfg.execution.reconstructionWorkers;
+workerCount = min(requestedWorkers, numel(sections));
+useParallel = workerCount > 1;
+
 fprintf("Reconstruction: %d sections x %d layers x %d channels = %d planes.\n", ...
     numel(sections), nLayers, nChannels, nPlanes);
 fprintf("Fusion: %s; z illumination: %s.\n", ...
     cfg.fusion.mode, cfg.zIllumination.method);
+if useParallel
+    fprintf("Execution: parallel, %d workers; one complete section per task.\n", ...
+        workerCount);
+else
+    fprintf("Execution: serial; one complete section at a time.\n");
+end
 fprintf("Output: %s\n", outputRoot);
 
-for sectionNumber = sections
-    % Placement geometry is shared by every channel and optical layer in one
-    % physical section.
-    geometry = stpt.fusion.computeGeometry(datasetIndex, sectionNumber);
-    for c = 1:nChannels
-        channel = datasetIndex.channels(c);
-        planes = cell(1, nLayers);
-        fusionAudit = cell(1, nLayers);
-
-        % Fuse every optical layer before applying the section/channel-level
-        % z correction. No uncorrected TIFF intermediate is written.
-        for layer = 1:nLayers
-            fprintf("  section %03d, ch%d (%s), layer %d: fusing\n", ...
-                sectionNumber, channel.id, channel.name, layer);
-            [planes{layer}, fusionAudit{layer}] = stpt.fusion.fusePlane( ...
-                datasetIndex, model, cfg, sectionNumber, layer, channel.id, ...
-                geometry);
-        end
-
-        [planes, zAudit, zDiagnostics] = ...
-            stpt.zillumination.apply(planes, cfg);
-        if collectDiagnostics
-            diagnosticNumber = diagnosticNumber + 1;
-            diagnostics(diagnosticNumber).sectionNumber = sectionNumber;
-            diagnostics(diagnosticNumber).channelId = channel.id;
-            diagnostics(diagnosticNumber).channelName = string(channel.name);
-            diagnostics(diagnosticNumber).zIllumination = zDiagnostics;
-        end
-
-        % Publish only the final planes and record one complete manifest row for
-        % every section/layer/channel coordinate.
-        for layer = 1:nLayers
-            rowNumber = rowNumber + 1;
-            outputPath = fullfile(channelDirectories(c), ...
-                sprintf("section_%03d_%02d.tif", sectionNumber, layer));
-            writeStarted = tic;
-            stpt.reconstruction.writePlane( ...
-                planes{layer}, outputPath, cfg.fusion.compression);
-            writeSeconds = toc(writeStarted);
-
-            fileInfo = dir(outputPath);
-            rows(rowNumber) = buildManifestRow( ...
-                fusionAudit{layer}, zAudit(layer), channel, outputPath, ...
-                fileInfo.bytes, cfg, writeSeconds);
-            fprintf("    [%d/%d] wrote layer %d: %.1f MiB LZW TIFF %.1f s\n", ...
-                rowNumber, nPlanes, layer, ...
-                fileInfo.bytes / 1024^2, writeSeconds);
-        end
+sectionManifests = cell(numel(sections), 1);
+sectionDiagnostics = cell(numel(sections), 1);
+if useParallel
+    poolCleanup = openPool(workerCount); %#ok<NASGU>
+    parfor sectionIndex = 1:numel(sections)
+        [sectionManifests{sectionIndex}, sectionDiagnostics{sectionIndex}] = ...
+            stpt.reconstruction.processSection(datasetIndex, model, cfg, ...
+            sections(sectionIndex), channelDirectories, collectDiagnostics);
+    end
+else
+    for sectionIndex = 1:numel(sections)
+        [sectionManifests{sectionIndex}, sectionDiagnostics{sectionIndex}] = ...
+            stpt.reconstruction.processSection(datasetIndex, model, cfg, ...
+            sections(sectionIndex), channelDirectories, collectDiagnostics);
     end
 end
 
-manifest = struct2table(rows);
+% Scheduling order is deliberately absent from all published products.
+manifest = vertcat(sectionManifests{:});
+manifest = sortrows(manifest, ["sectionNumber", "channelId", "layer"]);
 validateManifest(manifest, nPlanes);
+
+if collectDiagnostics
+    diagnostics = vertcat(sectionDiagnostics{:});
+    [~, order] = sortrows([[diagnostics.sectionNumber]', ...
+        [diagnostics.channelId]']);
+    diagnostics = diagnostics(order);
+else
+    diagnostics = struct([]);
+end
 end
 
-function row = emptyManifestRow()
-row = struct("sectionNumber", nan, "layer", nan, "channelId", nan, ...
-    "channelName", "", "filePath", "", ...
-    "widthPixels", nan, "heightPixels", nan, "compression", "lzw", ...
-    "outputBytes", nan, "fusionSeconds", nan, "writeSeconds", nan, ...
-    "totalSeconds", nan, ...
-    "correctedMinimum", nan, "correctedMaximum", nan, ...
-    "clippedLowPixels", nan, "clippedHighPixels", nan, ...
-    "zIlluminationMethod", "", "zIlluminationApplied", false, ...
-    "zReferenceLayer", nan, "preZMean", nan, "postZMean", nan, ...
-    "zGainP01", nan, "zGainMedian", nan, "zGainP99", nan, ...
-    "zEstimationHeightPixels", nan, "zEstimationWidthPixels", nan, ...
-    "zGaussianSigmaPixels", nan, "zClippedHighPixels", nan, ...
-    "zCorrectionSeconds", nan);
+function poolCleanup = openPool(workerCount)
+% Create a stage-owned local process pool and close it after reconstruction.
+if ~license('test', 'Distrib_Computing_Toolbox')
+    error("stpt:ParallelReconstruction", ...
+        "Parallel reconstruction requires Parallel Computing Toolbox.");
 end
 
-function row = buildManifestRow( ...
-        fusionAudit, zAudit, channel, path, outputBytes, cfg, writeSeconds)
-% Combine the independent fusion and z-correction audits for one final plane.
-row = emptyManifestRow();
-row.sectionNumber = fusionAudit.sectionNumber;
-row.layer = fusionAudit.layer;
-row.channelId = fusionAudit.channelId;
-row.channelName = string(channel.name);
-row.filePath = string(path);
-info = imfinfo(path);
-row.widthPixels = info.Width;
-row.heightPixels = info.Height;
-row.compression = lower(string(cfg.fusion.compression));
-row.outputBytes = outputBytes;
-row.fusionSeconds = fusionAudit.fusionSeconds;
-row.writeSeconds = writeSeconds;
-row.totalSeconds = fusionAudit.fusionSeconds + ...
-    zAudit.correctionSeconds + writeSeconds;
-row.correctedMinimum = fusionAudit.correctedMinimum;
-row.correctedMaximum = fusionAudit.correctedMaximum;
-row.clippedLowPixels = fusionAudit.clippedLowPixels;
-row.clippedHighPixels = fusionAudit.clippedHighPixels;
-row.zIlluminationMethod = string(zAudit.method);
-row.zIlluminationApplied = zAudit.applied;
-row.zReferenceLayer = zAudit.referenceLayer;
-row.preZMean = zAudit.preMean;
-row.postZMean = zAudit.postMean;
-row.zGainP01 = zAudit.gainP01;
-row.zGainMedian = zAudit.gainMedian;
-row.zGainP99 = zAudit.gainP99;
-row.zEstimationHeightPixels = zAudit.estimationHeightPixels;
-row.zEstimationWidthPixels = zAudit.estimationWidthPixels;
-row.zGaussianSigmaPixels = zAudit.gaussianSigmaPixels;
-row.zClippedHighPixels = zAudit.clippedHighPixels;
-row.zCorrectionSeconds = zAudit.correctionSeconds;
+pool = gcp("nocreate");
+if ~isempty(pool)
+    if pool.NumWorkers ~= workerCount
+        error("stpt:ParallelReconstruction", ...
+            "The existing pool has %d workers; configured reconstructionWorkers=%d.", ...
+            pool.NumWorkers, workerCount);
+    end
+    fprintf("Using existing parallel pool with %d workers.\n", workerCount);
+    poolCleanup = onCleanup(@() []);
+    return
+end
+
+fprintf("Starting local parallel pool with %d workers.\n", workerCount);
+pool = parpool("local", workerCount);
+poolCleanup = onCleanup(@() delete(pool));
 end
 
 function validateManifest(manifest, expectedPlanes)
@@ -159,9 +110,4 @@ if height(manifest) ~= expectedPlanes || height(keys) ~= expectedPlanes || ...
     error("stpt:ReconstructionOutput", ...
         "Reconstruction did not produce one file for every requested plane.");
 end
-end
-
-function value = emptyDiagnostic()
-value = struct("sectionNumber", nan, "channelId", nan, ...
-    "channelName", "", "zIllumination", struct());
 end

@@ -64,6 +64,14 @@ output trees: the pilot is a small validation product, not partial production
 output. Production can therefore begin from one unambiguous clean stage after
 the pilot settings have been accepted.
 
+Production dispatches complete physical sections with
+`cfg.execution.reconstructionWorkers`; the supplied production config uses four
+local process workers. Each worker still handles all channels and optical layers
+of its section, so z correction remains a section-local operation. The pilot is
+one section and therefore runs serially. Parallel scheduling is absent from the
+scientific signature and published manifest order, and a failed production stage
+is discarded and rerun in full rather than resumed section by section.
+
 Production writes only canonical final TIFFs under
 `03_reconstruction/production/stitched`. Minimal QC reads the published TIFFs
 at `cfg.sampling.qcSections` using one fixed display range per channel and plots
@@ -101,20 +109,36 @@ OpenSTP. The common weight image is scaled to a maximum of one before
 single-precision accumulation; this global scale cancels exactly in the
 normalized result. Clipping and uint16 conversion happen only after blending.
 
-Run it from the repository root:
+The comprehensive experiment config exposes every scientific and QC decision
+and defaults to the center-section development pilot:
 
 ```matlab
 addpath('config');
 runStptReconstruction(config_260812_MikeZ_PO431109_F_01());
 ```
 
-The master runner orchestrates the implemented stages from the same experiment
-config.
+Routine production uses a separate, deliberately concise standalone config. It
+contains the accepted active algorithms, selects four workers, and runs through
+the final downsampling stage:
+
+```matlab
+addpath('config');
+runStptReconstruction(config_260812_MikeZ_PO431109_F_01_production());
+```
+
+The production file is intended to be copied for each standard dataset and then
+edited directly: update paths and channels, verify the section range and major
+acquisition geometry, and adjust an active algorithm parameter only when needed.
+The comprehensive config remains an independent experimental version with
+additional alternatives and explanatory context. There is no config inheritance
+or hidden defaults between them. The master runner builds absent prerequisites
+and then runs production reconstruction and downsampling; a pilot is never a
+production prerequisite.
 
 To run production without running the pilot:
 
 ```matlab
-cfg = config_260812_MikeZ_PO431109_F_01();
+cfg = config_260812_MikeZ_PO431109_F_01_production();
 cfg.execution.stopAfter = "reconstructionProduction";
 runStptReconstruction(cfg);
 ```
@@ -123,9 +147,7 @@ To load the completed production reconstruction and write the downsampled
 channel volumes:
 
 ```matlab
-cfg = config_260812_MikeZ_PO431109_F_01();
-cfg.execution.stopAfter = "downsampling";
-runStptReconstruction(cfg);
+runStptReconstruction(config_260812_MikeZ_PO431109_F_01_production());
 ```
 
 Computation and visualization have independent regular samples. With
@@ -141,7 +163,7 @@ The planned metadata count remains `cfg.acquisition.sectionCount`. To process
 only a complete prefix or subset, override the reconstruction range explicitly:
 
 ```matlab
-cfg = config_260812_MikeZ_PO431109_F_01();
+cfg = config_260812_MikeZ_PO431109_F_01_production();
 cfg.processing.sectionStart = 1;
 cfg.processing.sectionStop = 260;
 runStptReconstruction(cfg);
@@ -159,7 +181,8 @@ terminal stage. When the tissue-Otsu model is requested and its completed
 selection checkpoint is absent, the master runner builds that prerequisite
 first. A completed illumination model is reused only when its training sample,
 QC sample, crop, row mode, and selected estimator parameters match the current
-configuration.
+configuration. Parallel production follows the same rule: workers write unique
+section files, but there are no per-section completion markers or resume logic.
 
 To stop after Stage 1:
 
@@ -169,9 +192,10 @@ cfg.execution.stopAfter = "index";
 runStptReconstruction(cfg);
 ```
 
-The experiment config currently stops after the Stage 3 reconstruction pilot.
-The later terminal names are `reconstructionPilot`, `reconstructionProduction`,
-and `downsampling`. Tissue
+The comprehensive experiment config stops after the Stage 3 reconstruction
+pilot with one worker; the production config stops after downsampling with four
+workers. The terminal names are `reconstructionPilot`,
+`reconstructionProduction`, and `downsampling`. Tissue
 selection is stored under `02_illumination/tissue_otsu/01_selection`; the fitted
 model is stored under `02_illumination/tissue_otsu/02_model`; canonical pilot
 planes and QC are stored under `03_reconstruction/pilot`. Neither Stage 2
@@ -195,7 +219,7 @@ The package is divided by responsibility:
 | `stpt.preprocessing` | Apply the explicit native-TIFF-to-target-grid tile orientation after illumination correction. |
 | `stpt.fusion` | Compute target-grid geometry, prepare native tiles, and dispatch overwrite or Fiji-style mosaic fusion. |
 | `stpt.zillumination` | Apply the shared within-section optical-layer interface and StitchIt smooth-ratio correction. |
-| `stpt.reconstruction` | Group fused layers by section/channel, apply z correction, publish final TIFFs and manifests, record provenance, and generate pilot or production QC. |
+| `stpt.reconstruction` | Process complete physical sections, dispatch production serially or in parallel, apply z correction, publish final TIFFs and manifests, and generate pilot or production QC. |
 | `stpt.resampling` | Resample an ordered TIFF series with the generic single-precision XY-first, z-second calculation. |
 | `stpt.downsampling` | Adapt the production manifest to ordered channel series, publish compact multipage volumes, and write Stage 4 QC. |
 
@@ -242,7 +266,8 @@ Shared interface functions contain no StitchIt estimation logic:
 | `stpt.illumination.applyModel` | Crop, subtract the selected offset, and multiply by the model gain; return `single` without hidden clipping or casting. |
 | `stpt.illumination.identityModel` | Preserve the model contract while replacing every offset and gain with `D=0` and `G=1` for crop-only comparisons. |
 | `stpt.zillumination.apply` | Apply the configured method to all optical layers from one physical section/channel; treat one layer as identity. |
-| `stpt.reconstruction.processSections` | Fuse complete section/channel layer groups, apply z illumination in memory, and publish only final planes plus their manifest. |
+| `stpt.reconstruction.processSection` | Fuse every channel/layer group in one physical section, apply z illumination in memory, and publish only final planes. |
+| `stpt.reconstruction.processSections` | Dispatch the same section worker serially or in parallel and assemble one canonically ordered manifest. |
 | `stpt.reconstruction.writeReconstructionStepComparison` | Independently reconstruct the four ordered correction/blending/z-correction variants and assemble matched visual QC. |
 | `stpt.downsampling.buildPlaneList` | Sort one channel by physical section and optical layer and require a complete final-plane series. |
 | `stpt.resampling.resampleVolume` | Convert an ordered TIFF list plus input/output `[z,y,x]` voxel sizes to one single-precision `[y,x,z]` volume. |

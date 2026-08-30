@@ -314,16 +314,20 @@ signature = stpt.reconstruction.buildSignature( ...
 save(fullfile(stageDir, "reconstruction_signature.mat"), "signature");
 
 canonicalRoot = string(fullfile(stageDir, "stitched"));
+reconstructionStarted = tic;
 manifest = stpt.reconstruction.processSections( ...
     datasetIndex, model, cfg, sections, canonicalRoot);
+reconstructionWallSeconds = toc(reconstructionStarted);
 stpt.writeTableAtomic(manifest, fullfile(stageDir, "manifest.csv"));
 stpt.reconstruction.writeProductionQC( ...
-    datasetIndex, cfg, manifest, stageDir);
+    datasetIndex, cfg, manifest, stageDir, reconstructionWallSeconds);
 
 writelines("Production reconstruction completed " + ...
     string(datetime("now")), fullfile(stageDir, "stage_complete.txt"));
 fprintf("Stage 3 production complete: %d sections, %d reconstructed planes.\n", ...
     numel(sections), height(manifest));
+fprintf("Reconstruction wall time: %.1f seconds.\n", ...
+    reconstructionWallSeconds);
 fprintf("Outputs: %s\n\n", stageDir);
 end
 
