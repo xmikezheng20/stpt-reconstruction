@@ -17,6 +17,18 @@ for parity = ["odd", "even"]
         selection.tiles.layer == layer & ...
         selection.tiles.gridParity == parity;
     selectedTiles = selection.tiles(rows, :);
+    candidateCount = height(selectedTiles);
+
+    % Tissue selection is defined by the reference channel. A selected physical
+    % tile may still be absent from another channel, so retain only real TIFFs
+    % before constructing that channel's template stack.
+    available = false(candidateCount, 1);
+    for i = 1:candidateCount
+        [~, available(i)] = stpt.io.resolveTileFile(datasetIndex, ...
+            selectedTiles.sectionNumber(i), layer, ...
+            selectedTiles.acquisitionIndex(i), channelId);
+    end
+    selectedTiles = selectedTiles(available, :);
     nSelected = height(selectedTiles);
     if nSelected == 0
         error("stpt:TissueOtsuTemplate", ...
@@ -37,9 +49,11 @@ for parity = ["odd", "even"]
     if parity == "odd"
         template.oddRows = averageImage;
         template.oddN = nSelected;
+        template.oddMissingN = candidateCount - nSelected;
     else
         template.evenRows = averageImage;
         template.evenN = nSelected;
+        template.evenMissingN = candidateCount - nSelected;
     end
 end
 

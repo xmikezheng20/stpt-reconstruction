@@ -1,9 +1,11 @@
 function validateAgainstConfig(datasetIndex, cfg)
 %VALIDATEAGAINSTCONFIG Reject a completed index built for another geometry.
 
-if string(datasetIndex.rawRoot) ~= string(cfg.paths.rawRoot)
+if ~isfield(datasetIndex, "missingTiles") || ...
+        string(datasetIndex.rawRoot) ~= string(cfg.paths.rawRoot)
     error("stpt:StaleIndex", ...
-        "The completed index belongs to a different raw-data root.");
+        "The completed index is missing the sparse-file inventory or " + ...
+        "belongs to a different raw-data root.");
 end
 if ~isfield(datasetIndex, "masterMosaic") || ...
         datasetIndex.masterMosaic.parameters.sections ~= ...
@@ -61,5 +63,27 @@ for c = 1:numel(cfg.channels)
             "The completed index does not match configured channel %d.", ...
             configured.id);
     end
+end
+
+% Every channel retains one fixed slot per expected native index. Empty slots
+% must agree exactly with the explicit missing-tile inventory.
+expectedSlots = prod(cfg.acquisition.gridSize) * ...
+    cfg.acquisition.layersPerSection;
+indexedMissing = 0;
+for s = 1:numel(datasetIndex.sections)
+    section = datasetIndex.sections(s);
+    for c = 1:numel(datasetIndex.channels)
+        files = section.channelFiles{c};
+        if numel(files) ~= expectedSlots
+            error("stpt:StaleIndex", ...
+                "Section %d, channel %d does not have %d fixed file slots.", ...
+                section.number, datasetIndex.channels(c).id, expectedSlots);
+        end
+        indexedMissing = indexedMissing + nnz(strlength(files) == 0);
+    end
+end
+if indexedMissing ~= height(datasetIndex.missingTiles)
+    error("stpt:StaleIndex", ...
+        "The fixed file slots disagree with the missing-tile inventory.");
 end
 end

@@ -120,10 +120,18 @@ section, optical-layer, tile, and channel coordinates. It reconstructs the
 commanded tile grid, checks the config against the recorded acquisition, and
 writes inventories plus representative target-versus-actual position plots.
 
+The index contains one fixed slot for every expected native TIFF. An acquired
+slot stores its filename; a missing acquisition remains an explicit empty slot,
+so later filenames can never shift onto the wrong tile coordinates. Missing
+TIFFs are reported but are not fatal. Malformed names, wrong channel codes,
+duplicate indices, out-of-span indices, and inconsistent Mosaic geometry remain
+errors because their logical interpretation is ambiguous.
+
 The configured processing range may be shorter than the planned acquisition.
 For example, an acquisition planned for 300 sections but stopped early can use
 only a known-complete prefix such as sections 1–260. Every requested section
-must still be complete in every configured channel.
+must have its Mosaic metadata and section directory, but individual missing
+TIFFs are represented explicitly and processed as absent observations.
 
 ### Stage 2: XY illumination model
 
@@ -139,6 +147,10 @@ Tiles above the global threshold are retained as tissue-bearing observations.
 Selected tile locations are then pooled directly across sampled sections. A 10%
 pixelwise trimmed mean estimates a template for every channel, optical layer,
 and scan-row parity.
+
+Only physically acquired TIFFs enter Otsu fitting or template estimation. A
+missing tile is neither background nor tissue and contributes no synthetic zero
+image to an illumination average.
 
 With the default `rowMode = "pool"`, odd/even templates are combined by their
 observation counts and one correction is applied to every tile row. Given
@@ -184,6 +196,11 @@ and evaluates the normalized weighted mosaic
 fused(x,y) = sum_i(w_i * corrected_i) / sum_i(w_i).
 ```
 
+The sum runs only over acquired tiles. A missing tile contributes neither
+intensity nor weight, so neighboring overlap remains correctly normalized.
+Pixels with no acquired coverage remain zero, and an in-memory support mask
+distinguishes those pixels from true zero-valued fluorescence.
+
 The common weight image is divided by its maximum before accumulation. That
 global scale cancels between numerator and denominator and does not alter the
 result. Clipping and uint16 conversion occur only after fusion.
@@ -193,6 +210,11 @@ first layer before any final TIFF is published. The StitchIt smooth-ratio method
 reduces the fused planes, broadly Gaussian-smooths the reference and target,
 and applies their spatial ratio as a multiplicative gain. A one-layer dataset
 passes through this interface unchanged.
+
+When either layer contains missing coverage, the reference and target fields
+are estimated over their common support. This excludes the same absent region
+from both sides of the ratio and prevents a missing tile from creating an
+artificial z-gain halo. The unsupported output region remains zero.
 
 The complete physical section is the parallel work unit: all channels and
 optical layers needed by that section remain together. Production uses
@@ -214,6 +236,10 @@ The intermediate array is single precision and held in RAM. Rounding,
 saturation, and conversion to uint16 happen once at the final lossless-LZW TIFF
 write. Requested and realized voxel sizes are both recorded because integer
 output dimensions can introduce a small spacing difference.
+
+Stage 4 needs no special sparse-data path: Stage 3 still publishes every
+expected full-size output plane, and the documented zero-valued unsupported
+regions are resampled normally.
 
 For this dataset, `[z,y,x]` changes from `[25,1,1]` to `[25,25,25]` µm. The
 output is 600 by 508 by 396 voxels; z already has the requested spacing and is
@@ -343,6 +369,35 @@ copied into production. Other development terminal stages are `index`,
 The master runner owns stage order and derived-output directories. Scientific
 functions never rename, reorganize, or write into the raw acquisition roots.
 
+## Missing-tile interfaces
+
+Missing acquisition data crosses stage boundaries through explicit metadata,
+not placeholder TIFFs or imputed fluorescence. No new config option is needed.
+
+| Stage | Input contract | Output contract | Persistent audit artifacts | Missing-data behavior |
+| --- | --- | --- | --- | --- |
+| 1. Index | Config, Mosaic files, and native channel roots. | `datasetIndex.sections(...).channelFiles` has one fixed slot per expected native index; absent slots are empty. `datasetIndex.missingTiles` gives their logical coordinates. | `section_inventory.csv`, `missing_tiles.csv`, `stage_summary.txt`, and one `qc/missing_tiles/*.png` grid map per affected plane. | Reports missing TIFFs and completes. Ambiguous filenames, duplicates, unexpected indices, or invalid geometry still stop the stage. |
+| 2. Illumination | Completed sparse-aware index; real TIFFs returned by `loadTileStack`. | Tissue selection and illumination model record the same missing-tile inventory as their scientific input. | Existing selection/model tables, MAT files, summaries, and plots. | Missing observations are excluded from thresholds and averages. A selected reference-channel location is also omitted from a channel template if that channel's TIFF is absent. |
+| 3. Reconstruction | Completed index and matching illumination model. | One ordinary full-size final TIFF per section/channel/layer plus a manifest recording expected, present, and missing tile counts and unsupported pixel count. | `manifest.csv`, reconstruction signature, summaries, and normal pilot/production QC. | Fusion omits both signal and weight from absent tiles. Its transient support masks are passed to z correction and are not written as full-resolution files. Unsupported pixels remain zero. |
+| 4. Downsampling | The complete ordered Stage 3 TIFF manifest. | One resampled multipage TIFF per channel and the existing volume manifest/QC. | Existing volumes, manifest, summary, and orthogonal-section plots. | No special case is required because Stage 3 preserves plane count and dimensions. |
+
+The key shared I/O contracts are:
+
+- `resolveTileFile` returns `(filePath, isPresent)`; a missing logical slot gives
+  `""` and `false`.
+- `loadTile` loads one known-present TIFF and treats a direct request for a
+  missing slot as an error.
+- `loadTileStack` returns only acquired images, with their original acquisition
+  indices and target-grid coordinates in `tileStatistics`.
+- `fusePlane` returns `(stitched, audit, supportMask)`. Scalar `true` denotes
+  complete canvas support without allocating a plane-sized mask; an affected
+  plane returns its explicit logical mask. Support exists only in memory and
+  accompanies the layer group into `zillumination.apply`.
+
+Missingness is included in illumination-model and reconstruction signatures.
+If a raw TIFF is later recovered, rerun Stage 1 and its dependent stages from a
+clean output tree so the new observation is incorporated.
+
 ## Algorithm provenance
 
 This repository has no runtime dependency on StitchIt and calls no
@@ -371,7 +426,7 @@ reference is:
 Run the repository tests from its root:
 
 ```bash
-matlab -batch "addpath('tests'); testZIllumination; testDownsampling;"
+matlab -batch "addpath('tests'); testZIllumination; testDownsampling; testMissingTiles;"
 ```
 
 The reference-dataset integration checks additionally established that four

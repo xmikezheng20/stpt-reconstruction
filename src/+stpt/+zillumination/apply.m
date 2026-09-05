@@ -1,8 +1,9 @@
-function [corrected, audit, diagnostics] = apply(planes, cfg)
+function [corrected, audit, diagnostics] = apply(planes, cfg, supportMasks)
 %APPLY Apply the configured within-section correction to optical layers.
 %
 % PLANES is one cell per optical layer for a single physical section and
-% channel. A one-layer acquisition is always an identity operation.
+% channel. SUPPORTMASKS distinguishes acquired coverage from real zero-valued
+% pixels. A one-layer acquisition is always an identity operation.
 
 nLayers = numel(planes);
 if nLayers < 1
@@ -10,6 +11,10 @@ if nLayers < 1
         "At least one optical layer is required.");
 end
 validatePlanes(planes);
+if nargin < 3
+    supportMasks = repmat({true}, size(planes));
+end
+validateSupportMasks(supportMasks, planes);
 
 configuredMethod = string(cfg.zIllumination.method);
 method = lower(configuredMethod);
@@ -25,11 +30,28 @@ switch method
     case "stitchitsmoothratio"
         [corrected, audit, diagnostics] = ...
             stpt.zillumination.stitchitSmoothRatio( ...
-            planes, cfg.zIllumination);
+            planes, cfg.zIllumination, supportMasks);
     otherwise
         error("stpt:ZIlluminationMethod", ...
             "Unknown z-illumination method: %s", ...
             cfg.zIllumination.method);
+end
+end
+
+function validateSupportMasks(supportMasks, planes)
+if ~iscell(supportMasks) || numel(supportMasks) ~= numel(planes)
+    error("stpt:ZIlluminationInput", ...
+        "One support mask is required for every optical layer.");
+end
+for layer = 1:numel(planes)
+    mask = supportMasks{layer};
+    isComplete = islogical(mask) && isscalar(mask) && mask;
+    isSparse = islogical(mask) && ...
+        isequal(size(mask), size(planes{layer})) && any(mask(:));
+    if ~isComplete && ~isSparse
+        error("stpt:ZIlluminationInput", ...
+            "Support must be scalar true or a nonempty logical plane mask.");
+    end
 end
 end
 

@@ -5,8 +5,14 @@ function writeQC(datasetIndex, cfg, stageDir)
 stageDir = string(stageDir);
 writetable(datasetIndex.sectionInventory, ...
     fullfile(stageDir, "section_inventory.csv"));
+writetable(datasetIndex.missingTiles, ...
+    fullfile(stageDir, "missing_tiles.csv"));
 writeMetadataSummary(datasetIndex, cfg, ...
     fullfile(stageDir, "metadata_summary.txt"));
+
+% Missing acquisition slots are always visualized, independent of the regular
+% representative-section QC sample.
+writeMissingTileQC(datasetIndex, fullfile(stageDir, "qc", "missing_tiles"));
 
 % Emit a complete tile audit and two geometry checks for selected sections.
 for sectionNumber = cfg.sampling.qcSections
@@ -108,6 +114,12 @@ fprintf(fid, "  Post-crop overlap: %.6g x %.6g pixels\n", ...
 fprintf(fid, "  Nominal stitched canvas: %.6g x %.6g pixels\n\n", ...
     geometry.nominalCanvasSizePixels);
 
+fprintf(fid, "Acquisition completeness\n");
+fprintf(fid, "  Missing expected TIFFs: %d\n", ...
+    height(datasetIndex.missingTiles));
+fprintf(fid, "  Missing-tile table: missing_tiles.csv\n");
+fprintf(fid, "  Missing-plane maps: qc/missing_tiles\n\n");
+
 fclose(fid);
 end
 
@@ -119,15 +131,24 @@ if fid < 0
     error("stpt:WriteOutput", "Could not write %s.", outputPath);
 end
 
-fprintf(fid, "Stage 1 passed\n");
+if isempty(datasetIndex.missingTiles)
+    fprintf(fid, "Stage 1 completed: no expected TIFFs are missing\n");
+else
+    fprintf(fid, "Stage 1 completed with %d missing expected TIFF(s)\n", ...
+        height(datasetIndex.missingTiles));
+end
 fprintf(fid, "Sections indexed: %d\n", height(inventory));
 fprintf(fid, "Processing range: %d:%d\n", ...
     cfg.processing.sections(1), cfg.processing.sections(end));
 fprintf(fid, "Positions per section: %d\n", unique(inventory.positionCount));
 for channel = datasetIndex.channels'
-    field = sprintf("ch%dFileCount", channel.id);
-    fprintf(fid, "ch%d TIFFs per section: %d\n", ...
-        channel.id, unique(inventory.(field)));
+    countField = sprintf("ch%dFileCount", channel.id);
+    missingField = sprintf("ch%dMissingCount", channel.id);
+    counts = inventory.(countField);
+    fprintf(fid, "ch%d available TIFFs/section: %d to %d\n", ...
+        channel.id, min(counts), max(counts));
+    fprintf(fid, "ch%d missing expected TIFFs: %d\n", ...
+        channel.id, sum(inventory.(missingField)));
 end
 fprintf(fid, "Representative QC sections: %s\n", ...
     mat2str(cfg.sampling.qcSections));
@@ -142,6 +163,63 @@ fprintf(fid, "Maximum target/actual residual: %.3f um\n", ...
 fprintf(fid, "Raw TIFFs modified: no\n");
 fprintf(fid, "Completed: %s\n", string(datetime("now")));
 fclose(fid);
+end
+
+function writeMissingTileQC(datasetIndex, outputDir)
+% Draw one compact grid map for every channel/section/layer with missing data.
+outputDir = string(outputDir);
+if ~isfolder(outputDir)
+    mkdir(outputDir);
+end
+missing = datasetIndex.missingTiles;
+if isempty(missing)
+    return
+end
+
+planes = unique(missing(:, ...
+    ["sectionNumber", "channelId", "channelName", "layer"]), "rows");
+for i = 1:height(planes)
+    plane = planes(i, :);
+    rows = missing.sectionNumber == plane.sectionNumber & ...
+        missing.channelId == plane.channelId & missing.layer == plane.layer;
+    planeMissing = missing(rows, :);
+    outputPath = fullfile(outputDir, sprintf( ...
+        "section_%03d_ch%02d_%s_layer_%02d.png", ...
+        plane.sectionNumber, plane.channelId, plane.channelName, plane.layer));
+    plotMissingTileMap(planeMissing, datasetIndex.geometry.gridSize, ...
+        outputPath);
+end
+end
+
+function plotMissingTileMap(missing, gridSize, outputPath)
+% Show acquired grid slots in gray and missing slots in red with exact indices.
+occupancy = ones(gridSize(2), gridSize(1));
+linear = sub2ind(size(occupancy), missing.gridY, missing.gridX);
+occupancy(linear) = 0;
+
+fig = figure("Visible", "off", "Color", "w", ...
+    "Position", [100, 100, 900, 700]);
+imagesc(occupancy, [0, 1]);
+axis image
+set(gca, "YDir", "reverse", "XTick", 1:gridSize(1), ...
+    "YTick", 1:gridSize(2));
+xlabel("Grid x");
+ylabel("Grid y");
+colormap(gca, [0.90, 0.20, 0.15; 0.88, 0.88, 0.88]);
+hold on
+for i = 1:height(missing)
+    text(missing.gridX(i), missing.gridY(i), sprintf( ...
+        "a%d\nn%d", missing.acquisitionIndex(i), missing.nativeIndex(i)), ...
+        "HorizontalAlignment", "center", "VerticalAlignment", "middle", ...
+        "Color", "w", "FontWeight", "bold", "FontSize", 8);
+end
+title(sprintf("Section %03d | ch%d %s | layer %d | %d missing tile(s)", ...
+    missing.sectionNumber(1), missing.channelId(1), ...
+    missing.channelName(1), missing.layer(1), height(missing)));
+subtitle("Red labels: acquisition index (a), native index (n)");
+grid on
+exportgraphics(fig, outputPath, "Resolution", 160);
+close(fig);
 end
 
 function plotTargetGrid(positions, sectionNumber, outputPath)

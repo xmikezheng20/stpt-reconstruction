@@ -1,9 +1,12 @@
-function filePath = resolveTileFile(datasetIndex, sectionNumber, layer, ...
+function [filePath, isPresent] = resolveTileFile( ...
+        datasetIndex, sectionNumber, layer, ...
         acquisitionIndex, channelId)
-%RESOLVETILEFILE Resolve one indexed tile without changing the native layout.
+%RESOLVETILEFILE Resolve one logical tile without changing the native layout.
 %
 % ACQUISITIONINDEX is one-based within the 14-by-18 scan. Native TIFF indices
 % are zero-based, with all tiles from layer 1 followed by all tiles from layer 2.
+% A missing acquisition slot returns filePath="" and isPresent=false; later
+% slots retain their exact logical coordinates.
 
 % Resolve user-facing section/channel identifiers to positions in the index.
 sectionPosition = find([datasetIndex.sections.number] == sectionNumber, 1);
@@ -24,6 +27,11 @@ end
 sectionFileOffset = (layer - 1) * nTiles + acquisitionIndex - 1;
 section = datasetIndex.sections(sectionPosition);
 fileName = section.channelFiles{channelPosition}(sectionFileOffset + 1);
-filePath = string(fullfile(datasetIndex.channels(channelPosition).root, ...
-    section.channelDirectories(channelPosition), fileName));
+isPresent = strlength(fileName) > 0;
+if isPresent
+    filePath = string(fullfile(datasetIndex.channels(channelPosition).root, ...
+        section.channelDirectories(channelPosition), fileName));
+else
+    filePath = "";
+end
 end

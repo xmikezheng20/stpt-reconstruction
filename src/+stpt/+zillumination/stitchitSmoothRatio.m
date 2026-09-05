@@ -1,5 +1,5 @@
 function [corrected, audit, diagnostics] = ...
-        stitchitSmoothRatio(planes, parameters)
+        stitchitSmoothRatio(planes, parameters, supportMasks)
 %STITCHITSMOOTHRATIO Match deeper optical layers to a smoothed reference.
 %
 % This is a close port of the numerical core in StitchIt's
@@ -17,10 +17,16 @@ nEstimationPixels = prod(targetSize);
 sigma = round(2 * sqrt( ...
     nEstimationPixels * parameters.filterAreaFraction / pi));
 gaussian = fspecial("gaussian", sigma * 3, sigma);
-referenceStarted = tic;
-referenceField = smoothReduced( ...
-    planes{referenceLayer}, targetSize, gaussian);
-referenceSeconds = toc(referenceStarted);
+completeSupport = all(cellfun(@(mask) all(mask(:)), supportMasks));
+if completeSupport
+    referenceStarted = tic;
+    referenceField = smoothReduced( ...
+        planes{referenceLayer}, targetSize, gaussian);
+    referenceSeconds = toc(referenceStarted);
+else
+    referenceField = [];
+    referenceSeconds = 0;
+end
 
 corrected = planes;
 audit = repmat(emptyAudit(), nLayers, 1);
@@ -50,8 +56,29 @@ for layer = 1:nLayers
     end
 
     started = tic;
-    targetField = smoothReduced(planes{layer}, targetSize, gaussian);
-    gain = referenceField ./ targetField;
+    if completeSupport
+        layerReferenceField = referenceField;
+        targetField = smoothReduced(planes{layer}, targetSize, gaussian);
+    else
+        % Use identical valid support in both smooth fields. Zeroing the common
+        % missing region in numerator and denominator excludes that absent
+        % observation without treating it as true darkness; the common local
+        % mask normalization would cancel from their ratio.
+        commonSupport = supportMasks{referenceLayer} & supportMasks{layer};
+        if ~any(commonSupport(:))
+            error("stpt:ZIlluminationSupport", ...
+                "Reference and target layers have no common acquired support.");
+        end
+        referenceForEstimation = planes{referenceLayer};
+        targetForEstimation = planes{layer};
+        referenceForEstimation(~commonSupport) = 0;
+        targetForEstimation(~commonSupport) = 0;
+        layerReferenceField = smoothReduced( ...
+            referenceForEstimation, targetSize, gaussian);
+        targetField = smoothReduced( ...
+            targetForEstimation, targetSize, gaussian);
+    end
+    gain = layerReferenceField ./ targetField;
     if any(~isfinite(gain(:))) || any(gain(:) <= 0)
         error("stpt:ZIlluminationGain", ...
             "The smoothed layer ratio is not finite and positive.");
@@ -65,6 +92,7 @@ for layer = 1:nLayers
             "The upsampled layer gain is not finite and positive.");
     end
     scaled = single(planes{layer}) .* fullGain;
+    scaled(~supportMasks{layer}) = 0;
 
     audit(layer).applied = true;
     audit(layer).gainP01 = gainPercentiles(1);

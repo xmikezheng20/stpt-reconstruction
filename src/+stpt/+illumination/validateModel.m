@@ -2,7 +2,8 @@ function validateModel(model, datasetIndex)
 %VALIDATEMODEL Check the standard illumination-model contract.
 
 required = ["method", "rowMode", "trainingSections", ...
-    "tissueReferenceChannel", "cropPixels", "inputTileSizePixels", ...
+    "tissueReferenceChannel", "missingTiles", "cropPixels", ...
+    "inputTileSizePixels", ...
     "outputTileSizePixels", "channels"];
 for field = required
     if ~isfield(model, field)
@@ -26,6 +27,10 @@ end
 if ~isequal([model.channels.id], [datasetIndex.channels.id])
     error("stpt:IlluminationModel", ...
         "Illumination-model channels do not match the dataset index.");
+end
+if ~isequaln(model.missingTiles, datasetIndex.missingTiles)
+    error("stpt:IlluminationModel", ...
+        "The illumination model was fitted from a different tile inventory.");
 end
 
 expectedSize = fliplr(model.outputTileSizePixels); % MATLAB [rows, columns]

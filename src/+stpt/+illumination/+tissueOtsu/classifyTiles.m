@@ -57,6 +57,7 @@ selection.referenceChannel = channelId;
 selection.trainingSections = sections;
 selection.qcSections = cfg.illumination.qcSections(:)';
 selection.cropPixels = crop;
+selection.missingTiles = datasetIndex.missingTiles;
 selection.thresholdLog = thresholdLog;
 selection.thresholdRawEquivalent = thresholdRawEquivalent;
 selection.tiles = tiles;

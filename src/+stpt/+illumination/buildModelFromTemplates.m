@@ -10,6 +10,7 @@ model.method = string(cfg.illumination.method);
 model.rowMode = lower(string(cfg.illumination.rowMode));
 model.trainingSections = cfg.illumination.trainingSections(:)';
 model.tissueReferenceChannel = cfg.illumination.tissueReferenceChannel;
+model.missingTiles = datasetIndex.missingTiles;
 model.cropPixels = cfg.preprocessing.cropPixels;
 model.inputTileSizePixels = datasetIndex.geometry.tileSizePixels;
 model.outputTileSizePixels = datasetIndex.geometry.retainedTileSizePixels;

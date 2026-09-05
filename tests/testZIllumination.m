@@ -32,6 +32,28 @@ assert(isequal(diagnostics.estimationSizePixels, size(reference)));
 assert(audit(2).gaussianSigmaPixels == ...
     diagnostics.gaussianSigmaPixels);
 
+% Missing acquired support is excluded symmetrically from both smooth fields.
+% A true two-fold attenuation therefore remains exactly correct outside the
+% unsupported hole, while the hole itself remains zero.
+targetWithHole = attenuated;
+targetSupport = true(size(targetWithHole));
+targetSupport(80:110, 95:125) = false;
+targetWithHole(~targetSupport) = 0;
+supportMasks = {true(size(reference)), targetSupport};
+[maskedCorrected, maskedAudit, maskedDiagnostics] = ...
+    stpt.zillumination.apply( ...
+    {reference, targetWithHole}, cfg, supportMasks);
+assert(all(maskedCorrected{2}(targetSupport) == 2000));
+assert(all(maskedCorrected{2}(~targetSupport) == 0));
+assert(abs(maskedAudit(2).gainMedian - 2) < 1e-6);
+assert(all(abs(maskedDiagnostics.gainFields{2}(:) - 2) < 1e-6));
+
+% Supplying complete masks follows the exact original numerical path.
+completeMasks = {true(size(reference)), true(size(attenuated))};
+explicitComplete = stpt.zillumination.apply( ...
+    {reference, attenuated}, cfg, completeMasks);
+assert(isequal(explicitComplete, corrected));
+
 fprintf("testZIllumination: PASS\n");
 end
 

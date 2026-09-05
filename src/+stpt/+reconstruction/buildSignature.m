@@ -8,6 +8,7 @@ signature.configuredProcessingSections = datasetIndex.processingSections;
 signature.reconstructionSections = sections(:)';
 signature.channelIds = [datasetIndex.channels.id];
 signature.channelNames = string({datasetIndex.channels.name});
+signature.missingTiles = datasetIndex.missingTiles;
 signature.gridSize = datasetIndex.geometry.gridSize;
 signature.tileSizePixels = datasetIndex.geometry.tileSizePixels;
 signature.retainedTileSizePixels = ...

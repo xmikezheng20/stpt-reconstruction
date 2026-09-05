@@ -63,6 +63,8 @@ emptySection = struct("number", [], "mosaicPath", "", ...
     "nativeStartIndex", [], "nativeEndIndex", []);
 sections = repmat(emptySection, nSections, 1);
 fileCounts = zeros(nSections, nChannels);
+missingCounts = zeros(nSections, nChannels);
+missingParts = cell(nSections * nChannels, 1);
 positionCounts = zeros(nSections, 1);
 metadataStartNumbers = zeros(nSections, 1);
 residualRmsXUm = zeros(nSections, 1);
@@ -100,6 +102,11 @@ for s = 1:nSections
         [channelFiles{c}, fileCounts(s, c)] = inventoryTiffs( ...
             sectionPath, channels(c).fileCode, expectedFileCount, ...
             nativeStartIndex);
+        missingParts{(s - 1) * nChannels + c} = makeMissingTileTable( ...
+            sectionNumber, channels(c), channelDirectories(c), ...
+            channelFiles{c}, nativeStartIndex, positions, nTiles);
+        missingCounts(s, c) = height( ...
+            missingParts{(s - 1) * nChannels + c});
     end
 
     % Each position corresponds to one XY tile and is reused by both layers.
@@ -146,11 +153,22 @@ sectionInventory = table(processingSections, positionCounts, ...
 for c = 1:nChannels
     variableName = sprintf("ch%dFileCount", channels(c).id);
     sectionInventory.(variableName) = fileCounts(:, c);
+    variableName = sprintf("ch%dMissingCount", channels(c).id);
+    sectionInventory.(variableName) = missingCounts(:, c);
+end
+
+missingTiles = vertcat(missingParts{:});
+if ~isempty(missingTiles)
+    warning("stpt:MissingTiles", ...
+        "%d expected TIFF(s) are missing. Stage 1 will record their " + ...
+        "logical positions and reconstruction will preserve those gaps.", ...
+        height(missingTiles));
+    disp(missingTiles(:, ["sectionNumber", "channelId", "layer", ...
+        "acquisitionIndex", "nativeIndex", "gridX", "gridY"]));
 end
 
 % Read one TIFF header as a lightweight check of configured pixel dimensions.
-firstFilePath = fullfile(channels(1).root, ...
-    sections(1).channelDirectories(1), sections(1).channelFiles{1}(1));
+firstFilePath = findFirstPresentFile(sections, channels);
 sampleInfo = imfinfo(firstFilePath);
 if sampleInfo.Width ~= cfg.acquisition.tileSizePixels(1) || ...
         sampleInfo.Height ~= cfg.acquisition.tileSizePixels(2)
@@ -200,6 +218,7 @@ datasetIndex.sampleTiff = struct("path", string(firstFilePath), ...
     "width", sampleInfo.Width, "height", sampleInfo.Height, ...
     "bitDepth", sampleInfo.BitDepth);
 datasetIndex.sectionInventory = sectionInventory;
+datasetIndex.missingTiles = missingTiles;
 datasetIndex.sections = sections;
 end
 
@@ -238,17 +257,13 @@ end
 
 function [fileNames, fileCount] = inventoryTiffs(sectionPath, fileCode, ...
         expectedCount, expectedStartIndex)
-% Count files first, then parse native global index and channel code from names.
+% Parse native indices into fixed expected slots. Missing slots remain empty,
+% so one absent TIFF can never shift the logical identity of later files.
 listing = dir(fullfile(sectionPath, "*.tif"));
 fileCount = numel(listing);
-if fileCount ~= expectedCount
-    error("stpt:TiffCount", ...
-        "%s has %d TIFFs; expected %d.", ...
-        sectionPath, fileCount, expectedCount);
-end
 
 rawIndices = nan(fileCount, 1);
-fileNames = strings(fileCount, 1);
+listedNames = strings(fileCount, 1);
 for i = 1:fileCount
     token = regexp(listing(i).name, "-(\d+)_([0-9]+)\.tif$", ...
         "tokens", "once");
@@ -261,18 +276,83 @@ for i = 1:fileCount
             "Unexpected channel code in %s.", listing(i).name);
     end
     rawIndices(i) = str2double(token{1});
-    fileNames(i) = string(listing(i).name);
+    listedNames(i) = string(listing(i).name);
 end
 
-% Sorting by parsed numeric index avoids lexicographic ordering (1, 10, 100...).
-[rawIndices, order] = sort(rawIndices);
-fileNames = fileNames(order);
-expectedIndices = (expectedStartIndex:expectedStartIndex+expectedCount-1)';
-if ~isequal(rawIndices, expectedIndices)
+% Duplicate or out-of-span files are ambiguous and remain fatal. A genuinely
+% absent expected index is represented by an empty element in the dense map.
+if numel(unique(rawIndices)) ~= numel(rawIndices)
     error("stpt:TiffSequence", ...
-        "%s does not contain the native TIFF span %d:%d recorded by startnum.", ...
-        sectionPath, expectedIndices(1), expectedIndices(end));
+        "%s contains duplicate native TIFF indices.", sectionPath);
 end
+expectedEndIndex = expectedStartIndex + expectedCount - 1;
+outside = rawIndices < expectedStartIndex | rawIndices > expectedEndIndex;
+if any(outside)
+    error("stpt:TiffSequence", ...
+        "%s contains native TIFF indices outside the expected span %d:%d.", ...
+        sectionPath, expectedStartIndex, expectedEndIndex);
+end
+
+fileNames = strings(expectedCount, 1);
+offsets = rawIndices - expectedStartIndex + 1;
+fileNames(offsets) = listedNames;
+end
+
+function missing = makeMissingTileTable(sectionNumber, channel, ...
+        sectionDirectory, fileNames, nativeStartIndex, positions, nTiles)
+% Convert empty filename slots into explicit acquisition and grid coordinates.
+missingOffsets = find(strlength(fileNames) == 0) - 1;
+nMissing = numel(missingOffsets);
+layer = floor(missingOffsets / nTiles) + 1;
+acquisitionIndex = mod(missingOffsets, nTiles) + 1;
+
+if nMissing == 0
+    missing = emptyMissingTileTable();
+    return
+end
+
+positionRows = zeros(nMissing, 1);
+for i = 1:nMissing
+    positionRows(i) = find( ...
+        positions.acquisitionIndex == acquisitionIndex(i), 1);
+end
+
+missing = table( ...
+    repmat(sectionNumber, nMissing, 1), ...
+    repmat(channel.id, nMissing, 1), ...
+    repmat(string(channel.name), nMissing, 1), ...
+    layer, acquisitionIndex, nativeStartIndex + missingOffsets, ...
+    positions.gridX(positionRows), positions.gridY(positionRows), ...
+    repmat(string(sectionDirectory), nMissing, 1), ...
+    'VariableNames', {'sectionNumber', 'channelId', 'channelName', ...
+    'layer', 'acquisitionIndex', 'nativeIndex', 'gridX', 'gridY', ...
+    'sectionDirectory'});
+end
+
+function missing = emptyMissingTileTable()
+% Stable empty schema keeps CSV and signature handling identical for intact data.
+missing = table(zeros(0, 1), zeros(0, 1), strings(0, 1), ...
+    zeros(0, 1), zeros(0, 1), zeros(0, 1), zeros(0, 1), zeros(0, 1), ...
+    strings(0, 1), 'VariableNames', ...
+    {'sectionNumber', 'channelId', 'channelName', 'layer', ...
+    'acquisitionIndex', 'nativeIndex', 'gridX', 'gridY', ...
+    'sectionDirectory'});
+end
+
+function filePath = findFirstPresentFile(sections, channels)
+% Find a real TIFF header even when the first logical acquisition slot is absent.
+for s = 1:numel(sections)
+    for c = 1:numel(channels)
+        present = find(strlength(sections(s).channelFiles{c}) > 0, 1);
+        if ~isempty(present)
+            filePath = fullfile(channels(c).root, ...
+                sections(s).channelDirectories(c), ...
+                sections(s).channelFiles{c}(present));
+            return
+        end
+    end
+end
+error("stpt:MissingTiffs", "No TIFFs were found in the processing range.");
 end
 
 function positions = buildTargetGrid(positionRecords, cfg)

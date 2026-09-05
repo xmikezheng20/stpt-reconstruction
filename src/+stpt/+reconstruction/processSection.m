@@ -5,7 +5,8 @@ function [manifest, diagnostics] = processSection( ...
 %
 % Fusion first produces one uint16 mosaic per layer. Z illumination then acts
 % on the complete layer group before final TIFFs are published. This function
-% owns no stage lifecycle or parallel policy and is safe to run as one task.
+% carries fusion support masks into z correction, owns no stage lifecycle or
+% parallel policy, and is safe to run as one task.
 
 nLayers = datasetIndex.geometry.layersPerSection;
 nChannels = numel(datasetIndex.channels);
@@ -26,6 +27,7 @@ rowNumber = 0;
 for c = 1:nChannels
     channel = datasetIndex.channels(c);
     planes = cell(1, nLayers);
+    supportMasks = cell(1, nLayers);
     fusionAudit = cell(1, nLayers);
 
     % No uncorrected TIFF intermediate is written. Both layers remain in
@@ -33,20 +35,21 @@ for c = 1:nChannels
     for layer = 1:nLayers
         fprintf("    section %03d, ch%d (%s), layer %d: fusing\n", ...
             sectionNumber, channel.id, channel.name, layer);
-        [planes{layer}, fusionAudit{layer}] = stpt.fusion.fusePlane( ...
-            datasetIndex, model, cfg, sectionNumber, layer, channel.id, ...
-            geometry);
+        [planes{layer}, fusionAudit{layer}, supportMasks{layer}] = ...
+            stpt.fusion.fusePlane(datasetIndex, model, cfg, ...
+            sectionNumber, layer, channel.id, geometry);
     end
 
     if collectDiagnostics
         [planes, zAudit, zDiagnostics] = ...
-            stpt.zillumination.apply(planes, cfg);
+            stpt.zillumination.apply(planes, cfg, supportMasks);
         diagnostics(c).sectionNumber = sectionNumber;
         diagnostics(c).channelId = channel.id;
         diagnostics(c).channelName = string(channel.name);
         diagnostics(c).zIllumination = zDiagnostics;
     else
-        [planes, zAudit] = stpt.zillumination.apply(planes, cfg);
+        [planes, zAudit] = ...
+            stpt.zillumination.apply(planes, cfg, supportMasks);
     end
 
     % Publish only final planes. Each path belongs to this section alone.
@@ -79,6 +82,8 @@ row = struct("sectionNumber", nan, "layer", nan, "channelId", nan, ...
     "widthPixels", nan, "heightPixels", nan, "compression", "lzw", ...
     "outputBytes", nan, "fusionSeconds", nan, "writeSeconds", nan, ...
     "totalSeconds", nan, ...
+    "expectedTileCount", nan, "presentTileCount", nan, ...
+    "missingTileCount", nan, "uncoveredPixelCount", nan, ...
     "correctedMinimum", nan, "correctedMaximum", nan, ...
     "clippedLowPixels", nan, "clippedHighPixels", nan, ...
     "zIlluminationMethod", "", "zIlluminationApplied", false, ...
@@ -107,6 +112,10 @@ row.fusionSeconds = fusionAudit.fusionSeconds;
 row.writeSeconds = writeSeconds;
 row.totalSeconds = fusionAudit.fusionSeconds + ...
     zAudit.correctionSeconds + writeSeconds;
+row.expectedTileCount = fusionAudit.expectedTileCount;
+row.presentTileCount = fusionAudit.presentTileCount;
+row.missingTileCount = fusionAudit.missingTileCount;
+row.uncoveredPixelCount = fusionAudit.uncoveredPixelCount;
 row.correctedMinimum = fusionAudit.correctedMinimum;
 row.correctedMaximum = fusionAudit.correctedMaximum;
 row.clippedLowPixels = fusionAudit.clippedLowPixels;
