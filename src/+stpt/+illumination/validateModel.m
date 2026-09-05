@@ -42,6 +42,7 @@ for c = 1:numel(model.channels)
     end
     for layerIndex = 1:numel(channel.layers)
         layer = channel.layers(layerIndex);
+        validateCorrectionStatus(layer, channel.id, layerIndex);
         validateParity(layer.offset.oddRows, layer.gain.oddRows, expectedSize);
         validateParity(layer.offset.evenRows, layer.gain.evenRows, expectedSize);
         if rowMode == "pool" && (~isequal(layer.offset.oddRows, ...
@@ -53,6 +54,48 @@ for c = 1:numel(model.channels)
                 "A pooled model must use one identical field for all rows.");
         end
     end
+end
+end
+
+function validateCorrectionStatus(layer, channelId, layerIndex)
+% A fallback is valid only when it is an exact, explicitly explained identity.
+required = ["correctionApplied", "correctionReason", "offset", "gain", ...
+    "normalization"];
+for field = required
+    if ~isfield(layer, field)
+        error("stpt:IlluminationModel", ...
+            "Channel %d layer %d is missing field '%s'.", ...
+            channelId, layerIndex, field);
+    end
+end
+if ~islogical(layer.correctionApplied) || ...
+        ~isscalar(layer.correctionApplied) || ...
+        ~isscalar(string(layer.correctionReason))
+    error("stpt:IlluminationModel", ...
+        "Channel %d layer %d has an invalid correction status.", ...
+        channelId, layerIndex);
+end
+
+reason = string(layer.correctionReason);
+normalizations = [layer.normalization.oddRows, ...
+    layer.normalization.evenRows];
+if any(~isfinite(normalizations))
+    error("stpt:IlluminationModel", ...
+        "Channel %d layer %d has a nonfinite normalization.", ...
+        channelId, layerIndex);
+end
+if layer.correctionApplied
+    if strlength(reason) ~= 0 || any(normalizations <= 0)
+        error("stpt:IlluminationModel", ...
+            "A fitted correction requires positive normalizations and no reason.");
+    end
+elseif strlength(reason) == 0 || ...
+        any(layer.offset.oddRows(:) ~= 0) || ...
+        any(layer.offset.evenRows(:) ~= 0) || ...
+        any(layer.gain.oddRows(:) ~= 1) || ...
+        any(layer.gain.evenRows(:) ~= 1)
+    error("stpt:IlluminationModel", ...
+        "An unapplied correction must be an explained exact identity.");
 end
 end
 

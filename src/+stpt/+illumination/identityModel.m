@@ -22,6 +22,8 @@ for c = 1:numel(identity.channels)
             size(layerModel.gain.evenRows), "single");
         layerModel.normalization.oddRows = single(1);
         layerModel.normalization.evenRows = single(1);
+        layerModel.correctionApplied = false;
+        layerModel.correctionReason = "qcIdentity";
         identity.channels(c).layers(layer) = layerModel;
     end
 end

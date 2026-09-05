@@ -162,6 +162,13 @@ G = median(T) / T
 corrected = (cropped raw - D) .* G.
 ```
 
+This gain is fitted only when the finite template has a positive median and
+strictly positive cropped support. If a finite template is nonpositive, as can
+happen when a channel PMT fails, that channel/layer uses the exact identity
+model `D = 0, G = 1`. The fallback is recorded in the model summary and gain
+plot. Malformed dimensions, nonfinite values, and absent input observations
+remain errors rather than being hidden by the fallback.
+
 The common model interface also supports `rowMode = "split"` and the retained
 `stitchitReference` estimator in the comprehensive config. Stage 2 writes the
 selection and fitted model as separate auditable checkpoints, but it writes no
@@ -215,6 +222,12 @@ When either layer contains missing coverage, the reference and target fields
 are estimated over their common support. This excludes the same absent region
 from both sides of the ratio and prevents a missing tile from creating an
 artificial z-gain halo. The unsupported output region remains zero.
+
+Z validity is decided independently for every fused reference/target pair. A
+finite, positive smoothed field and gain are corrected normally; an undefined
+ratio uses unit gain and leaves that target plane unchanged. This decision does
+not inherit the XY-model status. The reconstruction manifest records separate
+XY and Z applied flags and reasons, making both identity decisions explicit.
 
 The complete physical section is the parallel work unit: all channels and
 optical layers needed by that section remain together. Production uses
@@ -377,8 +390,8 @@ not placeholder TIFFs or imputed fluorescence. No new config option is needed.
 | Stage | Input contract | Output contract | Persistent audit artifacts | Missing-data behavior |
 | --- | --- | --- | --- | --- |
 | 1. Index | Config, Mosaic files, and native channel roots. | `datasetIndex.sections(...).channelFiles` has one fixed slot per expected native index; absent slots are empty. `datasetIndex.missingTiles` gives their logical coordinates. | `section_inventory.csv`, `missing_tiles.csv`, `stage_summary.txt`, and one `qc/missing_tiles/*.png` grid map per affected plane. | Reports missing TIFFs and completes. Ambiguous filenames, duplicates, unexpected indices, or invalid geometry still stop the stage. |
-| 2. Illumination | Completed sparse-aware index; real TIFFs returned by `loadTileStack`. | Tissue selection and illumination model record the same missing-tile inventory as their scientific input. | Existing selection/model tables, MAT files, summaries, and plots. | Missing observations are excluded from thresholds and averages. A selected reference-channel location is also omitted from a channel template if that channel's TIFF is absent. |
-| 3. Reconstruction | Completed index and matching illumination model. | One ordinary full-size final TIFF per section/channel/layer plus a manifest recording expected, present, and missing tile counts and unsupported pixel count. | `manifest.csv`, reconstruction signature, summaries, and normal pilot/production QC. | Fusion omits both signal and weight from absent tiles. Its transient support masks are passed to z correction and are not written as full-resolution files. Unsupported pixels remain zero. |
+| 2. Illumination | Completed sparse-aware index; real TIFFs returned by `loadTileStack`. | Tissue selection and illumination model record the same missing-tile inventory and whether each channel/layer gain was fitted or replaced by identity. | Existing selection/model tables, MAT files, summaries, and plots. | Missing observations are excluded from thresholds and averages. A selected reference-channel location is also omitted from a channel template if that channel's TIFF is absent. A finite nonpositive template receives exact identity gain. |
+| 3. Reconstruction | Completed index and matching illumination model. | One ordinary full-size final TIFF per section/channel/layer plus a manifest recording tile completeness and separate XY/Z correction decisions. | `manifest.csv`, reconstruction signature, summaries, and normal pilot/production QC. | Fusion omits both signal and weight from absent tiles. Its transient support masks are passed to z correction and are not written as full-resolution files. Unsupported pixels remain zero. An undefined Z ratio leaves the fused target plane unchanged. |
 | 4. Downsampling | The complete ordered Stage 3 TIFF manifest. | One resampled multipage TIFF per channel and the existing volume manifest/QC. | Existing volumes, manifest, summary, and orthogonal-section plots. | No special case is required because Stage 3 preserves plane count and dimensions. |
 
 The key shared I/O contracts are:
@@ -426,7 +439,7 @@ reference is:
 Run the repository tests from its root:
 
 ```bash
-matlab -batch "addpath('tests'); testZIllumination; testDownsampling; testMissingTiles;"
+matlab -batch "addpath('tests'); testIlluminationFallback; testZIllumination; testDownsampling; testMissingTiles;"
 ```
 
 The reference-dataset integration checks additionally established that four

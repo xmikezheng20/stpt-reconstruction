@@ -140,12 +140,15 @@ stitched = uint16(round(min(max(weightedSum ./ weightSum, 0), 65535)));
 end
 
 function model = identityModel(datasetIndex)
+model.method = "identity";
 model.inputTileSizePixels = [6, 6];
 model.cropPixels = [0, 0, 0, 0];
 layer.offset.oddRows = single(0);
 layer.offset.evenRows = single(0);
 layer.gain.oddRows = ones(6, 6, "single");
 layer.gain.evenRows = ones(6, 6, "single");
+layer.correctionApplied = false;
+layer.correctionReason = "testIdentity";
 channel.id = datasetIndex.channels.id;
 channel.layers = layer;
 model.channels = channel;

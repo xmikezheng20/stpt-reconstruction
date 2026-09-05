@@ -1,4 +1,4 @@
-function writeQC(audit, datasetIndex, cfg, stageDir)
+function writeQC(audit, datasetIndex, cfg, model, stageDir)
 %WRITEQC Write the small set of StitchIt-reference checkpoint plots.
 %
 % The detector-floor plots explain the threshold without implying that retained
@@ -29,7 +29,7 @@ for c = 1:numel(datasetIndex.channels)
         outputPath = fullfile(qcDir, sprintf( ...
             "ch%d_layer%d_template_qc.png", channelId, layer));
         plotTemplateComparison(template, cfg.preprocessing.cropPixels, ...
-            outputPath);
+            model.channels(c).layers(layer), outputPath);
     end
 end
 end
@@ -95,6 +95,9 @@ imagesc(displayImage);
 axis image
 colormap(gca, gray(256));
 displayLimits = prctile(displayImage(:), [0.5, 99.8]);
+if displayLimits(1) == displayLimits(2)
+    displayLimits = displayLimits + [0, 1];
+end
 clim(displayLimits);
 tileWidth = size(tiles{1}, 2);
 centers = tileWidth * ((1:numel(tiles)) - 0.5);
@@ -143,9 +146,13 @@ for i = 1:numel(rows)
 end
 end
 
-function plotTemplateComparison(template, cropPixels, outputPath)
+function plotTemplateComparison(template, cropPixels, layerModel, outputPath)
 % Compare normalized odd/even fields only within support retained after crop.
 retained = retainedMask(size(template.oddRows), cropPixels);
+if ~layerModel.correctionApplied
+    plotFallbackTemplates(template, retained, layerModel, outputPath);
+    return
+end
 odd = double(template.oddRows) / median(template.oddRows(retained));
 even = double(template.evenRows) / median(template.evenRows(retained));
 differencePct = 200 * (odd - even) ./ (odd + even);
@@ -178,6 +185,41 @@ colormap(ax, redWhiteBlue(256));
 
 sgtitle(sprintf("Illumination template: ch%d, layer %d | correlation %.4f | median |difference| %.2f%%", ...
     template.channel, template.layer, fieldCorrelation, medianDifference));
+exportgraphics(fig, outputPath, "Resolution", 150);
+close(fig);
+end
+
+function plotFallbackTemplates(template, retained, layerModel, outputPath)
+% Keep a failed reference template inspectable without dividing by zero.
+odd = double(template.oddRows);
+even = double(template.evenRows);
+fieldLimits = prctile([odd(retained); even(retained)], [1, 99]);
+if fieldLimits(1) == fieldLimits(2)
+    fieldLimits = fieldLimits + [0, 1];
+end
+
+fig = figure("Visible", "off", "Color", "w", ...
+    "Position", [100, 100, 1250, 430]);
+tiledlayout(1, 3, "Padding", "compact", "TileSpacing", "compact");
+
+ax = nexttile;
+imagesc(odd); axis image off; clim(fieldLimits); colorbar
+title("Raw odd-row template");
+colormap(ax, parula(256));
+
+ax = nexttile;
+imagesc(even); axis image off; clim(fieldLimits); colorbar
+title("Raw even-row template");
+colormap(ax, parula(256));
+
+nexttile
+axis off
+text(0.5, 0.5, "Identity fallback" + newline + ...
+    layerModel.correctionReason, "HorizontalAlignment", "center", ...
+    "VerticalAlignment", "middle");
+
+sgtitle(sprintf("Illumination template: ch%d, layer %d", ...
+    template.channel, template.layer));
 exportgraphics(fig, outputPath, "Resolution", 150);
 close(fig);
 end

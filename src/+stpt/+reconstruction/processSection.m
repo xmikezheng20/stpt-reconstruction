@@ -52,6 +52,17 @@ for c = 1:nChannels
             stpt.zillumination.apply(planes, cfg, supportMasks);
     end
 
+    % Numerical Z failures are explicit identity decisions, not stage errors.
+    % Report them with section/channel context while retaining details in the
+    % manifest for dataset-wide review.
+    for layer = 1:nLayers
+        if ~zAudit(layer).applied && isZFallback(zAudit(layer).reason)
+            fprintf("    section %03d, ch%d (%s), layer %d: " + ...
+                "z identity fallback (%s)\n", sectionNumber, ...
+                channel.id, channel.name, layer, zAudit(layer).reason);
+        end
+    end
+
     % Publish only final planes. Each path belongs to this section alone.
     for layer = 1:nLayers
         rowNumber = rowNumber + 1;
@@ -64,7 +75,8 @@ for c = 1:nChannels
 
         fileInfo = dir(outputPath);
         rows(rowNumber) = buildManifestRow( ...
-            fusionAudit{layer}, zAudit(layer), channel, outputPath, ...
+            fusionAudit{layer}, zAudit(layer), channel, ...
+            model.channels(c).layers(layer), model.method, outputPath, ...
             fileInfo.bytes, cfg, writeSeconds);
         fprintf("      wrote layer %d: %.1f MiB LZW TIFF in %.1f s\n", ...
             layer, fileInfo.bytes / 1024^2, writeSeconds);
@@ -84,9 +96,12 @@ row = struct("sectionNumber", nan, "layer", nan, "channelId", nan, ...
     "totalSeconds", nan, ...
     "expectedTileCount", nan, "presentTileCount", nan, ...
     "missingTileCount", nan, "uncoveredPixelCount", nan, ...
+    "xyIlluminationMethod", "", "xyIlluminationApplied", false, ...
+    "xyIlluminationReason", "", ...
     "correctedMinimum", nan, "correctedMaximum", nan, ...
     "clippedLowPixels", nan, "clippedHighPixels", nan, ...
     "zIlluminationMethod", "", "zIlluminationApplied", false, ...
+    "zIlluminationReason", "", ...
     "zReferenceLayer", nan, "preZMean", nan, "postZMean", nan, ...
     "zGainP01", nan, "zGainMedian", nan, "zGainP99", nan, ...
     "zEstimationHeightPixels", nan, "zEstimationWidthPixels", nan, ...
@@ -95,7 +110,8 @@ row = struct("sectionNumber", nan, "layer", nan, "channelId", nan, ...
 end
 
 function row = buildManifestRow( ...
-        fusionAudit, zAudit, channel, path, outputBytes, cfg, writeSeconds)
+        fusionAudit, zAudit, channel, illuminationLayer, ...
+        illuminationMethod, path, outputBytes, cfg, writeSeconds)
 % Combine the independent fusion and z-correction audits for one final plane.
 row = emptyManifestRow();
 row.sectionNumber = fusionAudit.sectionNumber;
@@ -116,12 +132,16 @@ row.expectedTileCount = fusionAudit.expectedTileCount;
 row.presentTileCount = fusionAudit.presentTileCount;
 row.missingTileCount = fusionAudit.missingTileCount;
 row.uncoveredPixelCount = fusionAudit.uncoveredPixelCount;
+row.xyIlluminationMethod = string(illuminationMethod);
+row.xyIlluminationApplied = illuminationLayer.correctionApplied;
+row.xyIlluminationReason = string(illuminationLayer.correctionReason);
 row.correctedMinimum = fusionAudit.correctedMinimum;
 row.correctedMaximum = fusionAudit.correctedMaximum;
 row.clippedLowPixels = fusionAudit.clippedLowPixels;
 row.clippedHighPixels = fusionAudit.clippedHighPixels;
 row.zIlluminationMethod = string(zAudit.method);
 row.zIlluminationApplied = zAudit.applied;
+row.zIlluminationReason = string(zAudit.reason);
 row.zReferenceLayer = zAudit.referenceLayer;
 row.preZMean = zAudit.preMean;
 row.postZMean = zAudit.postMean;
@@ -133,6 +153,12 @@ row.zEstimationWidthPixels = zAudit.estimationWidthPixels;
 row.zGaussianSigmaPixels = zAudit.gaussianSigmaPixels;
 row.zClippedHighPixels = zAudit.clippedHighPixels;
 row.zCorrectionSeconds = zAudit.correctionSeconds;
+end
+
+function tf = isZFallback(reason)
+% Reference, disabled, and one-layer identities are expected pipeline modes.
+tf = ~ismember(string(reason), ...
+    ["", "referenceLayer", "disabled", "singleLayer"]);
 end
 
 function value = emptyDiagnostic()

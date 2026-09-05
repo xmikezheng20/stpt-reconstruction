@@ -20,9 +20,10 @@ nLayers = datasetIndex.geometry.layersPerSection;
 channels = repmat(struct("id", [], "name", "", "layers", struct([])), ...
     nChannels, 1);
 
-% Construct one zero-offset gain model for every channel and layer. Pooled
-% models store the same gain in both parity slots so all downstream correction
-% and fusion code uses one stable interface.
+% Construct one zero-offset gain model for every channel and layer. A finite,
+% positive template produces the usual median-normalized gain. A nonpositive
+% template cannot define that ratio and therefore uses an explicit identity
+% model instead of amplifying detector noise or stopping reconstruction.
 for c = 1:nChannels
     channels(c).id = datasetIndex.channels(c).id;
     channels(c).name = datasetIndex.channels(c).name;
@@ -30,19 +31,44 @@ for c = 1:nChannels
     for layer = 1:nLayers
         template = templates{c, layer};
         if model.rowMode == "pool"
-            [pooledGain, pooledNormalization] = templateGain( ...
-                template.pooledRows, model.cropPixels);
-            layers(layer).gain.oddRows = pooledGain;
-            layers(layer).gain.evenRows = pooledGain;
+            [pooledGain, pooledNormalization, usable] = templateGain( ...
+                template.pooledRows, model.cropPixels, ...
+                model.inputTileSizePixels);
             layers(layer).normalization.oddRows = pooledNormalization;
             layers(layer).normalization.evenRows = pooledNormalization;
+            if usable
+                layers(layer).gain.oddRows = pooledGain;
+                layers(layer).gain.evenRows = pooledGain;
+                layers(layer).correctionApplied = true;
+            else
+                layers(layer) = useIdentityGain(layers(layer), ...
+                    model.outputTileSizePixels, "nonpositiveTemplate");
+            end
         else
-            [layers(layer).gain.oddRows, ...
-                layers(layer).normalization.oddRows] = templateGain( ...
-                template.oddRows, model.cropPixels);
-            [layers(layer).gain.evenRows, ...
-                layers(layer).normalization.evenRows] = templateGain( ...
-                template.evenRows, model.cropPixels);
+            [oddGain, oddNormalization, oddUsable] = templateGain( ...
+                template.oddRows, model.cropPixels, ...
+                model.inputTileSizePixels);
+            [evenGain, evenNormalization, evenUsable] = templateGain( ...
+                template.evenRows, model.cropPixels, ...
+                model.inputTileSizePixels);
+            layers(layer).normalization.oddRows = oddNormalization;
+            layers(layer).normalization.evenRows = evenNormalization;
+            if oddUsable && evenUsable
+                layers(layer).gain.oddRows = oddGain;
+                layers(layer).gain.evenRows = evenGain;
+                layers(layer).correctionApplied = true;
+            else
+                % Treat the complete layer atomically. Correcting only one row
+                % parity would create an artificial alternating-row pattern.
+                layers(layer) = useIdentityGain(layers(layer), ...
+                    model.outputTileSizePixels, "nonpositiveTemplate");
+            end
+        end
+
+        if ~layers(layer).correctionApplied
+            warning("stpt:IlluminationIdentityFallback", ...
+                "ch%d layer %d has a nonpositive illumination template; " + ...
+                "using zero offset and unit gain.", channels(c).id, layer);
         end
     end
     channels(c).layers = layers;
@@ -57,19 +83,38 @@ layer.offset = struct("oddRows", single(0), "evenRows", single(0));
 layer.gain = struct("oddRows", single([]), "evenRows", single([]));
 layer.normalization = struct("oddRows", single(nan), ...
     "evenRows", single(nan));
+layer.correctionApplied = false;
+layer.correctionReason = "";
 end
 
-function [gain, normalization] = templateGain(template, cropPixels)
+function [gain, normalization, usable] = templateGain( ...
+        template, cropPixels, inputTileSizePixels)
 % Normalize on the full raw template, then retain only reconstruction support.
 template = single(template);
+expectedSize = fliplr(inputTileSizePixels); % MATLAB [rows, columns]
+if ~isequal(size(template), expectedSize) || any(~isfinite(template(:)))
+    error("stpt:IlluminationTemplate", ...
+        "The illumination template has invalid dimensions or values.");
+end
 normalization = median(template(:));
 cropped = template( ...
     cropPixels(3)+1:end-cropPixels(4), ...
     cropPixels(1)+1:end-cropPixels(2));
-if ~isfinite(normalization) || normalization <= 0 || ...
-        any(~isfinite(cropped(:))) || any(cropped(:) <= 0)
-    error("stpt:IlluminationTemplate", ...
-        "The illumination template is invalid within cropped support.");
+usable = normalization > 0 && all(cropped(:) > 0);
+if usable
+    gain = normalization ./ cropped;
+else
+    gain = single([]);
 end
-gain = normalization ./ cropped;
+end
+
+function layer = useIdentityGain(layer, outputTileSizePixels, reason)
+% Preserve measured normalizations while making the applied transform exact.
+gainSize = fliplr(outputTileSizePixels); % MATLAB [rows, columns]
+layer.offset.oddRows = single(0);
+layer.offset.evenRows = single(0);
+layer.gain.oddRows = ones(gainSize, "single");
+layer.gain.evenRows = ones(gainSize, "single");
+layer.correctionApplied = false;
+layer.correctionReason = string(reason);
 end

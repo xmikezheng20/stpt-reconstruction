@@ -36,6 +36,8 @@ diagnostics.referenceLayer = referenceLayer;
 diagnostics.estimationSizePixels = targetSize;
 diagnostics.gaussianSigmaPixels = sigma;
 diagnostics.gainFields = cell(1, nLayers);
+diagnostics.correctionApplied = false(1, nLayers);
+diagnostics.correctionReason = strings(1, nLayers);
 
 for layer = 1:nLayers
     preMean = mean(planes{layer}, "all");
@@ -47,11 +49,13 @@ for layer = 1:nLayers
     audit(layer).gaussianSigmaPixels = sigma;
 
     if layer == referenceLayer
+        audit(layer).reason = "referenceLayer";
         audit(layer).postMean = preMean;
         audit(layer).gainP01 = 1;
         audit(layer).gainMedian = 1;
         audit(layer).gainP99 = 1;
         audit(layer).correctionSeconds = referenceSeconds;
+        diagnostics.correctionReason(layer) = "referenceLayer";
         continue
     end
 
@@ -66,8 +70,10 @@ for layer = 1:nLayers
         % mask normalization would cancel from their ratio.
         commonSupport = supportMasks{referenceLayer} & supportMasks{layer};
         if ~any(commonSupport(:))
-            error("stpt:ZIlluminationSupport", ...
-                "Reference and target layers have no common acquired support.");
+            [audit(layer), diagnostics] = recordIdentityFallback( ...
+                audit(layer), diagnostics, layer, planes{layer}, ...
+                "noCommonSupport", toc(started));
+            continue
         end
         referenceForEstimation = planes{referenceLayer};
         targetForEstimation = planes{layer};
@@ -78,23 +84,36 @@ for layer = 1:nLayers
         targetField = smoothReduced( ...
             targetForEstimation, targetSize, gaussian);
     end
-    gain = layerReferenceField ./ targetField;
-    if any(~isfinite(gain(:))) || any(gain(:) <= 0)
-        error("stpt:ZIlluminationGain", ...
-            "The smoothed layer ratio is not finite and positive.");
+
+    fieldReason = invalidFieldReason(layerReferenceField, targetField);
+    if strlength(fieldReason) > 0
+        [audit(layer), diagnostics] = recordIdentityFallback( ...
+            audit(layer), diagnostics, layer, planes{layer}, ...
+            fieldReason, toc(started));
+        continue
     end
 
-    diagnostics.gainFields{layer} = gain;
+    gain = layerReferenceField ./ targetField;
+    if any(~isfinite(gain(:))) || any(gain(:) <= 0)
+        [audit(layer), diagnostics] = recordIdentityFallback( ...
+            audit(layer), diagnostics, layer, planes{layer}, ...
+            "invalidGainField", toc(started));
+        continue
+    end
+
     gainPercentiles = prctile(double(gain(:)), [1, 50, 99]);
     fullGain = imresize(gain, "OutputSize", imageSize);
     if any(~isfinite(fullGain(:))) || any(fullGain(:) <= 0)
-        error("stpt:ZIlluminationGain", ...
-            "The upsampled layer gain is not finite and positive.");
+        [audit(layer), diagnostics] = recordIdentityFallback( ...
+            audit(layer), diagnostics, layer, planes{layer}, ...
+            "invalidUpsampledGain", toc(started));
+        continue
     end
     scaled = single(planes{layer}) .* fullGain;
     scaled(~supportMasks{layer}) = 0;
 
     audit(layer).applied = true;
+    audit(layer).reason = "";
     audit(layer).gainP01 = gainPercentiles(1);
     audit(layer).gainMedian = gainPercentiles(2);
     audit(layer).gainP99 = gainPercentiles(3);
@@ -104,7 +123,34 @@ for layer = 1:nLayers
     corrected{layer} = uint16(round(scaled));
     audit(layer).postMean = mean(corrected{layer}, "all");
     audit(layer).correctionSeconds = toc(started);
+    diagnostics.gainFields{layer} = gain;
+    diagnostics.correctionApplied(layer) = true;
 end
+end
+
+function reason = invalidFieldReason(referenceField, targetField)
+% Distinguish undefined correction data from structural input errors.
+if any(~isfinite(referenceField(:))) || any(~isfinite(targetField(:)))
+    reason = "nonfiniteSmoothedField";
+elseif any(referenceField(:) <= 0) || any(targetField(:) <= 0)
+    reason = "nonpositiveSmoothedField";
+else
+    reason = "";
+end
+end
+
+function [audit, diagnostics] = recordIdentityFallback( ...
+        audit, diagnostics, layer, plane, reason, elapsedSeconds)
+% Preserve the fused plane exactly when its multiplicative ratio is undefined.
+audit.applied = false;
+audit.reason = string(reason);
+audit.postMean = mean(plane, "all");
+audit.gainP01 = 1;
+audit.gainMedian = 1;
+audit.gainP99 = 1;
+audit.correctionSeconds = elapsedSeconds;
+diagnostics.correctionApplied(layer) = false;
+diagnostics.correctionReason(layer) = string(reason);
 end
 
 function targetSize = estimationSize(imageSize, maxPixels)
@@ -126,6 +172,7 @@ end
 
 function value = emptyAudit()
 value = struct("method", "", "applied", false, ...
+    "reason", "", ...
     "referenceLayer", nan, "preMean", nan, "postMean", nan, ...
     "gainP01", nan, "gainMedian", nan, "gainP99", nan, ...
     "estimationHeightPixels", nan, "estimationWidthPixels", nan, ...

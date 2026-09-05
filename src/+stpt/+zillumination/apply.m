@@ -18,11 +18,19 @@ validateSupportMasks(supportMasks, planes);
 
 configuredMethod = string(cfg.zIllumination.method);
 method = lower(configuredMethod);
-if nLayers == 1 || method == "none"
+if nLayers == 1
     corrected = planes;
-    audit = identityAudit(planes, cfg.zIllumination, configuredMethod);
+    audit = identityAudit( ...
+        planes, cfg.zIllumination, configuredMethod, "singleLayer");
     diagnostics = identityDiagnostics( ...
-        nLayers, cfg.zIllumination, configuredMethod);
+        nLayers, cfg.zIllumination, configuredMethod, "singleLayer");
+    return
+elseif method == "none"
+    corrected = planes;
+    audit = identityAudit( ...
+        planes, cfg.zIllumination, configuredMethod, "disabled");
+    diagnostics = identityDiagnostics( ...
+        nLayers, cfg.zIllumination, configuredMethod, "disabled");
     return
 end
 
@@ -68,13 +76,14 @@ for layer = 1:numel(planes)
 end
 end
 
-function audit = identityAudit(planes, parameters, method)
+function audit = identityAudit(planes, parameters, method, reason)
 nLayers = numel(planes);
 audit = repmat(emptyAudit(), nLayers, 1);
 for layer = 1:nLayers
     planeMean = mean(planes{layer}, "all");
     audit(layer).method = method;
     audit(layer).applied = false;
+    audit(layer).reason = string(reason);
     audit(layer).referenceLayer = parameters.referenceLayer;
     audit(layer).preMean = planeMean;
     audit(layer).postMean = planeMean;
@@ -84,17 +93,21 @@ for layer = 1:nLayers
 end
 end
 
-function diagnostics = identityDiagnostics(nLayers, parameters, method)
+function diagnostics = identityDiagnostics( ...
+        nLayers, parameters, method, reason)
 diagnostics = struct();
 diagnostics.method = method;
 diagnostics.referenceLayer = parameters.referenceLayer;
 diagnostics.estimationSizePixels = [];
 diagnostics.gaussianSigmaPixels = nan;
 diagnostics.gainFields = cell(1, nLayers);
+diagnostics.correctionApplied = false(1, nLayers);
+diagnostics.correctionReason = repmat(string(reason), 1, nLayers);
 end
 
 function value = emptyAudit()
 value = struct("method", "", "applied", false, ...
+    "reason", "", ...
     "referenceLayer", nan, "preMean", nan, "postMean", nan, ...
     "gainP01", nan, "gainMedian", nan, "gainP99", nan, ...
     "estimationHeightPixels", nan, "estimationWidthPixels", nan, ...

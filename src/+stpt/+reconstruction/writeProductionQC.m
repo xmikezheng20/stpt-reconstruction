@@ -15,7 +15,8 @@ plotRepresentativeSections( ...
     datasetIndex, qcSections, previews, displayLimits, ...
     fullfile(qcDir, "representative_sections.png"));
 
-if any(manifest.zIlluminationApplied)
+if datasetIndex.geometry.layersPerSection > 1 && ...
+        ~strcmpi(cfg.zIllumination.method, "none")
     plotZIlluminationTrends(datasetIndex, manifest, ...
         fullfile(qcDir, "z_illumination_trends.png"));
 end
@@ -96,15 +97,22 @@ tiledlayout(nChannels, 1, ...
 
 for c = 1:nChannels
     channel = datasetIndex.channels(c);
-    rows = manifest.channelId == channel.id & ...
-        manifest.zIlluminationApplied;
+    channelRows = manifest.channelId == channel.id;
+    rows = channelRows & manifest.zIlluminationApplied;
     values = sortrows(manifest(rows, :), "sectionNumber");
-    if isempty(values)
-        error("stpt:ReconstructionQC", ...
-            "No z-corrected rows were found for channel %d.", channel.id);
-    end
+    fallbackCount = nnz(channelRows & isZFallback(manifest.zIlluminationReason));
 
     nexttile
+    if isempty(values)
+        axis off
+        text(0.5, 0.5, sprintf( ...
+            "No Z gains applied\n%d identity fallback plane(s)", ...
+            fallbackCount), "HorizontalAlignment", "center", ...
+            "VerticalAlignment", "middle");
+        title(sprintf("ch%d %s", channel.id, channel.name));
+        continue
+    end
+
     plot(values.sectionNumber, values.zGainP01, ":", ...
         "Color", [0.45, 0.55, 0.75], "LineWidth", 1, ...
         "DisplayName", "1st percentile");
@@ -118,8 +126,8 @@ for c = 1:nChannels
     yline(1, "k--", "DisplayName", "identity");
     xlabel("Physical section");
     ylabel("Reference/target gain");
-    title(sprintf("ch%d %s: gain applied to non-reference layer", ...
-        channel.id, channel.name));
+    title(sprintf("ch%d %s: %d gains applied, %d identity fallbacks", ...
+        channel.id, channel.name, height(values), fallbackCount));
     grid on
     legend("Location", "best");
 end
@@ -214,8 +222,21 @@ fprintf(fid, "XY-corrected tile pixels below zero before fusion: %.0f\n", ...
     sum(manifest.clippedLowPixels, "omitnan"));
 fprintf(fid, "XY-corrected tile pixels above uint16 before fusion: %.0f\n", ...
     sum(manifest.clippedHighPixels, "omitnan"));
+xyFallback = ~manifest.xyIlluminationApplied;
+fprintf(fid, "Planes using XY identity processing: %d\n", ...
+    nnz(xyFallback));
+for reason = unique(manifest.xyIlluminationReason(xyFallback))'
+    fprintf(fid, "  %s: %d planes\n", reason, ...
+        nnz(xyFallback & manifest.xyIlluminationReason == reason));
+end
 fprintf(fid, "Planes changed by z illumination: %d\n", ...
     nnz(manifest.zIlluminationApplied));
+zFallback = isZFallback(manifest.zIlluminationReason);
+fprintf(fid, "Planes using Z identity fallback: %d\n", nnz(zFallback));
+for reason = unique(manifest.zIlluminationReason(zFallback))'
+    fprintf(fid, "  %s: %d planes\n", reason, ...
+        nnz(zFallback & manifest.zIlluminationReason == reason));
+end
 % CSV round-tripping may represent this Boolean column as numeric 0/1.
 correctedRows = manifest.zIlluminationApplied ~= 0;
 if any(correctedRows)
@@ -239,4 +260,9 @@ fprintf(fid, "Intermediate full-resolution TIFFs written: no\n");
 fprintf(fid, "Downsampled reconstruction written: no\n");
 fprintf(fid, "Completed: %s\n", string(datetime("now")));
 fclose(fid);
+end
+
+function tf = isZFallback(reason)
+tf = ~ismember(string(reason), ...
+    ["", "referenceLayer", "disabled", "singleLayer"]);
 end

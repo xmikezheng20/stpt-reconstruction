@@ -26,6 +26,9 @@ for c = 1:nChannels
     end
 end
 colorLimits = double(prctile(allGains, [1, 99]));
+if colorLimits(1) == colorLimits(2)
+    colorLimits = colorLimits + [-0.01, 0.01];
+end
 
 fig = figure("Visible", "off", "Color", "w", ...
     "Position", [100, 100, 1600, 750]);
@@ -51,8 +54,13 @@ for c = 1:nChannels
             imagesc(gain, colorLimits);
             axis image off
             colorbar
-            title(sprintf("ch%d layer %d %s", ...
-                model.channels(c).id, layer, rowField));
+            if layerModel.correctionApplied
+                status = "fitted";
+            else
+                status = "identity fallback";
+            end
+            title(sprintf("ch%d layer %d %s | %s", ...
+                model.channels(c).id, layer, rowField, status));
         end
     end
 end
@@ -84,9 +92,20 @@ fprintf(fid, "Templates: direct pooling across sections; no section averages\n")
 fprintf(fid, "Additive offset: zero\n");
 fprintf(fid, "Model support: cropped %d-by-%d pixels\n", ...
     model.outputTileSizePixels(1), model.outputTileSizePixels(2));
-fprintf(fid, "Maximum fitted gain: %.6g\n", max([ ...
-    audit.templateSummary.oddGainMax; ...
-    audit.templateSummary.evenGainMax]));
+applied = audit.templateSummary.correctionApplied;
+fprintf(fid, "Fitted channel/layer pairs: %d/%d\n", ...
+    nnz(applied), numel(applied));
+if any(applied)
+    fprintf(fid, "Maximum fitted gain: %.6g\n", max([ ...
+        audit.templateSummary.oddGainMax(applied); ...
+        audit.templateSummary.evenGainMax(applied)]));
+end
+fallbacks = audit.templateSummary(~applied, :);
+for row = 1:height(fallbacks)
+    fprintf(fid, "Identity fallback: ch%d layer %d (%s)\n", ...
+        fallbacks.channelId(row), fallbacks.layer(row), ...
+        fallbacks.correctionReason(row));
+end
 fprintf(fid, "Corrected TIFFs written: no\n");
 fprintf(fid, "Raw TIFFs modified: no\n");
 fprintf(fid, "Completed: %s\n", string(datetime("now")));
