@@ -51,10 +51,11 @@ cfg.fusion.qcPreviewScale = 0.10;
 cfg.fusion.blending.method = "fijiDistance";
 cfg.fusion.blending.alpha = 1.5;
 
-cfg.zIllumination.method = "stitchitSmoothRatio";
+cfg.zIllumination.method = "localTissueRatio";
 cfg.zIllumination.referenceLayer = 1;
-cfg.zIllumination.maxEstimationPixels = 1.5e6;
-cfg.zIllumination.filterAreaFraction = 0.01;
+cfg.zIllumination.tissueChannel = 2;
+cfg.zIllumination.estimationGridUm = 10;
+cfg.zIllumination.windowSigmaUm = 50;
 
 cfg.downsampling.outputVoxelSizeUm = [25, 25, 25]; % [z, y, x]
 cfg.downsampling.compression = "lzw";

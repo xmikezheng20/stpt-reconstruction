@@ -213,21 +213,52 @@ global scale cancels between numerator and denominator and does not alter the
 result. Clipping and uint16 conversion occur only after fusion.
 
 For multi-layer sections, the deeper fused layers are corrected against the
-first layer before any final TIFF is published. The StitchIt smooth-ratio method
+first layer before any final TIFF is published. A one-layer dataset passes
+through this interface unchanged.
+
+The production method, `localTissueRatio`, treats the extra depth of a deeper
+layer as a local transmission and multiplies that layer by
+
+```text
+T = G * (M .* Rref) ./ G * (M .* Rk)   on M, and 1 elsewhere,
+```
+
+the ratio of the two layers' local mean brightness over tissue they share.
+
+- `R` are block means on a grid of `estimationGridUm` (10 um).
+- `G` is a Gaussian of `windowSigmaUm` (50 um, twice the layer spacing). The
+  layers show the same structures from about this scale up, so a brightness
+  difference there is optical.
+- `M` is the tissue present in both layers. It is read once per section from
+  `tissueChannel`, the autofluorescence channel, and used for every channel, so
+  a tracer signal never defines tissue. For each layer, the block means are
+  smoothed by one grid pixel and thresholded by Otsu on log intensity, which
+  separates the empty canvas from tissue. Pieces smaller than one window are
+  dropped.
+
+`T` is upsampled bilinearly by exactly the block factor, so each grid value
+sits at the centre of its block. Zeros stay zero, and tissue seen by only one
+layer keeps its fused intensity. Each channel's gain comes from its own counts.
+The method assumes that empty canvas surrounds the section. It also assumes
+that both layers show the same structures at window scale; a sparse tracer
+channel should be checked for this before relying on it.
+
+The earlier `stitchitSmoothRatio` method is retained for comparison. It
 reduces the fused planes, broadly Gaussian-smooths the reference and target,
-and applies their spatial ratio as a multiplicative gain. A one-layer dataset
-passes through this interface unchanged.
+and applies their spatial ratio as a multiplicative gain. Its 1% image-area
+window is too coarse to follow tissue types, which leaves alternating-layer
+stripes.
 
-When either layer contains missing coverage, the reference and target fields
-are estimated over their common support. This excludes the same absent region
-from both sides of the ratio and prevents a missing tile from creating an
-artificial z-gain halo. The unsupported output region remains zero.
+Missing coverage is excluded from both sides of either ratio, so a missing tile
+cannot create an artificial z-gain halo. The unsupported output region remains
+zero.
 
-Z validity is decided independently for every fused reference/target pair. A
-finite, positive smoothed field and gain are corrected normally; an undefined
-ratio uses unit gain and leaves that target plane unchanged. This decision does
-not inherit the XY-model status. The reconstruction manifest records separate
-XY and Z applied flags and reasons, making both identity decisions explicit.
+Z validity is decided independently for every fused reference/target pair. An
+undefined ratio uses unit gain and leaves that target plane unchanged:
+`noCommonTissue` or `invalidGainField` for `localTissueRatio`, and
+`nonpositiveSmoothedField` for `stitchitSmoothRatio`. This decision does not
+inherit the XY-model status. The reconstruction manifest records separate XY
+and Z applied flags and reasons, making both identity decisions explicit.
 
 The complete physical section is the parallel work unit: all channels and
 optical layers needed by that section remain together. Production uses
@@ -273,7 +304,7 @@ adapters, parameter estimation, intermediate storage, and defaults.
 | Crop and orientation | Symmetric 15-pixel crop; correction in raw orientation; explicit 90-degree clockwise tile rotation. | Same 15-pixel crop and `fliplr(image')` orientation. | Crop is acquisition/config driven; BakingTray tiles already follow StitchIt's expected organization. |
 | Placement and overlap | Recorded 700-pixel target step; 102-pixel/12.72% overlap follows from retained support. | Configured 12% rule gives `floor(0.88 * 802) = 705` pixels and a slightly larger field. | Grid/stage positions are converted to pixels; overlap follows tile support and placement. |
 | Fusion | Canonical normalized Fiji-style blending with `alpha=1.5`; reverse overwrite is retained only as a pilot control. | Fiji-style blending with `alpha=1.5`. | Default reverse-acquisition overwrite (`fusionWeight=0`); alternative weighting is available. |
-| Z illumination | StitchIt smooth spatial ratio applied section/channel-wise before publishing final planes. | The current reference warping output retains the layer-2 attenuation. | `correctZilluminationInDirectory` applies the smooth reference/target ratio as a post-fusion operation. |
+| Z illumination | Local tissue ratio (10 um grid, 50 um window, green tissue mask shared by all channels) applied section/channel-wise before publishing final planes; the StitchIt smooth ratio is retained for comparison. | The current reference warping output retains the layer-2 attenuation. | `correctZilluminationInDirectory` applies the smooth reference/target ratio as a post-fusion operation. |
 | Full-resolution outputs | Only final z-corrected uint16/LZW section TIFFs. | Cropped/corrected tile intermediates plus stitched outputs. | Preprocessed acquisition products and stitched outputs follow the BakingTray directory tree. |
 | Downsampling | Separate final XY-first, z-second bicubic/antialiased resampling with explicit voxel vectors. | Separate bilinear reduction used for the legacy `p05` warping TIFFs. | Separate `resampleVolume` with the same XY-first, z-second bicubic organization. |
 | Execution lifecycle | Completed stages are reusable prerequisites; incomplete stages are discarded and rerun. No plane-level resume state. | Script-driven legacy workflow. | Full acquisition workflow includes its own sync, crunch, preprocessing, and directory markers. |

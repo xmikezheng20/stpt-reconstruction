@@ -23,8 +23,12 @@ fprintf("  section %03d: starting\n", sectionNumber);
 
 % Placement geometry is shared by every channel and layer in this section.
 geometry = stpt.fusion.computeGeometry(datasetIndex, sectionNumber);
-rowNumber = 0;
-for c = 1:nChannels
+
+% localTissueRatio reads tissue from one channel and uses it for all, so that
+% channel is fused first and its tissue masks are kept for the others.
+[channelOrder, tissueIndex] = channelProcessingOrder(datasetIndex, cfg);
+tissue = [];
+for c = channelOrder
     channel = datasetIndex.channels(c);
     planes = cell(1, nLayers);
     supportMasks = cell(1, nLayers);
@@ -40,16 +44,21 @@ for c = 1:nChannels
             sectionNumber, layer, channel.id, geometry);
     end
 
+    if c == tissueIndex
+        tissue = stpt.zillumination.tissueMasks(planes, supportMasks, ...
+            cfg.zIllumination, cfg.acquisition.pixelSizeUm);
+    end
+
     if collectDiagnostics
         [planes, zAudit, zDiagnostics] = ...
-            stpt.zillumination.apply(planes, cfg, supportMasks);
+            stpt.zillumination.apply(planes, cfg, supportMasks, tissue);
         diagnostics(c).sectionNumber = sectionNumber;
         diagnostics(c).channelId = channel.id;
         diagnostics(c).channelName = string(channel.name);
         diagnostics(c).zIllumination = zDiagnostics;
     else
         [planes, zAudit] = ...
-            stpt.zillumination.apply(planes, cfg, supportMasks);
+            stpt.zillumination.apply(planes, cfg, supportMasks, tissue);
     end
 
     % Numerical Z failures are explicit identity decisions, not stage errors.
@@ -65,7 +74,7 @@ for c = 1:nChannels
 
     % Publish only final planes. Each path belongs to this section alone.
     for layer = 1:nLayers
-        rowNumber = rowNumber + 1;
+        rowNumber = (c - 1) * nLayers + layer;
         outputPath = fullfile(channelDirectories(c), ...
             sprintf("section_%03d_%02d.tif", sectionNumber, layer));
         writeStarted = tic;
@@ -153,6 +162,18 @@ row.zEstimationWidthPixels = zAudit.estimationWidthPixels;
 row.zGaussianSigmaPixels = zAudit.gaussianSigmaPixels;
 row.zClippedHighPixels = zAudit.clippedHighPixels;
 row.zCorrectionSeconds = zAudit.correctionSeconds;
+end
+
+function [order, tissueIndex] = channelProcessingOrder(datasetIndex, cfg)
+% Put the tissue channel first when the z method needs its tissue masks.
+order = 1:numel(datasetIndex.channels);
+tissueIndex = [];
+if strcmpi(cfg.zIllumination.method, "localTissueRatio") && ...
+        datasetIndex.geometry.layersPerSection > 1
+    tissueIndex = find([datasetIndex.channels.id] == ...
+        cfg.zIllumination.tissueChannel);
+    order = [tissueIndex, setdiff(order, tissueIndex, "stable")];
+end
 end
 
 function tf = isZFallback(reason)

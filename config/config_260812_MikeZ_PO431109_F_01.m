@@ -84,11 +84,19 @@ cfg.fusion.qcPreviewScale = 0.10;
 cfg.fusion.blending.method = "fijiDistance";
 cfg.fusion.blending.alpha = 1.5;
 
-% Match deeper optical layers to the broadly smoothed first layer after fusion.
-% These are StitchIt's defaults. For this 1 um/pixel mosaic, 0.01 gives a
-% Gaussian sigma of about 1.26 mm; maxEstimationPixels controls computation.
-cfg.zIllumination.method = "stitchitSmoothRatio";
+% Match deeper optical layers to the first layer after fusion by the ratio of
+% their local mean brightness over shared tissue: 10 um block means, a 50 um
+% Gaussian window (twice the 25 um layer spacing), and tissue read from the
+% green channel for every channel.
+cfg.zIllumination.method = "localTissueRatio";
 cfg.zIllumination.referenceLayer = 1;
+cfg.zIllumination.tissueChannel = 2;
+cfg.zIllumination.estimationGridUm = 10;
+cfg.zIllumination.windowSigmaUm = 50;
+
+% Set method = "stitchitSmoothRatio" to compare with StitchIt's defaults: for
+% this 1 um/pixel mosaic, 0.01 gives a Gaussian sigma of about 1.26 mm, and
+% maxEstimationPixels controls computation.
 cfg.zIllumination.maxEstimationPixels = 1.5e6;
 cfg.zIllumination.filterAreaFraction = 0.01;
 

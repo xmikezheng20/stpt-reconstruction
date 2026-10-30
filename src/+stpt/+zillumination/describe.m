@@ -1,0 +1,16 @@
+function text = describe(parameters)
+%DESCRIBE One-line summary of the configured z-illumination parameters.
+
+text = sprintf("%s; reference layer %d", ...
+    string(parameters.method), parameters.referenceLayer);
+switch lower(string(parameters.method))
+    case "stitchitsmoothratio"
+        text = text + sprintf("; at most %.0f estimation pixels; " + ...
+            "filter-area fraction %.6g", parameters.maxEstimationPixels, ...
+            parameters.filterAreaFraction);
+    case "localtissueratio"
+        text = text + sprintf("; tissue channel %d; %.6g um grid; " + ...
+            "%.6g um window sigma", parameters.tissueChannel, ...
+            parameters.estimationGridUm, parameters.windowSigmaUm);
+end
+end

@@ -34,10 +34,16 @@ if strcmpi(cfg.fusion.mode, "fijiBlend")
 end
 signature.zIlluminationMethod = string(cfg.zIllumination.method);
 signature.zReferenceLayer = cfg.zIllumination.referenceLayer;
-signature.zMaxEstimationPixels = ...
-    cfg.zIllumination.maxEstimationPixels;
-signature.zFilterAreaFraction = ...
-    cfg.zIllumination.filterAreaFraction;
+if strcmpi(cfg.zIllumination.method, "localTissueRatio")
+    signature.zTissueChannel = cfg.zIllumination.tissueChannel;
+    signature.zEstimationGridUm = cfg.zIllumination.estimationGridUm;
+    signature.zWindowSigmaUm = cfg.zIllumination.windowSigmaUm;
+else
+    signature.zMaxEstimationPixels = ...
+        cfg.zIllumination.maxEstimationPixels;
+    signature.zFilterAreaFraction = ...
+        cfg.zIllumination.filterAreaFraction;
+end
 signature.outputClass = "uint16";
 signature.compression = lower(string(cfg.fusion.compression));
 signature.finalOrientation = "none";

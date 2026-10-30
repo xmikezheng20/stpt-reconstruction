@@ -1,9 +1,11 @@
-function [corrected, audit, diagnostics] = apply(planes, cfg, supportMasks)
+function [corrected, audit, diagnostics] = ...
+        apply(planes, cfg, supportMasks, tissue)
 %APPLY Apply the configured within-section correction to optical layers.
 %
 % PLANES is one cell per optical layer for a single physical section and
 % channel. SUPPORTMASKS distinguishes acquired coverage from real zero-valued
-% pixels. A one-layer acquisition is always an identity operation.
+% pixels. TISSUE holds the section's tissue masks from tissueMasks, required
+% by localTissueRatio. A one-layer acquisition is always an identity operation.
 
 nLayers = numel(planes);
 if nLayers < 1
@@ -15,6 +17,9 @@ if nargin < 3
     supportMasks = repmat({true}, size(planes));
 end
 validateSupportMasks(supportMasks, planes);
+if nargin < 4
+    tissue = [];
+end
 
 configuredMethod = string(cfg.zIllumination.method);
 method = lower(configuredMethod);
@@ -39,6 +44,14 @@ switch method
         [corrected, audit, diagnostics] = ...
             stpt.zillumination.stitchitSmoothRatio( ...
             planes, cfg.zIllumination, supportMasks);
+    case "localtissueratio"
+        if isempty(tissue)
+            error("stpt:ZIlluminationInput", ...
+                "localTissueRatio requires the section's tissue masks.");
+        end
+        [corrected, audit, diagnostics] = ...
+            stpt.zillumination.localTissueRatio( ...
+            planes, cfg.zIllumination, supportMasks, tissue);
     otherwise
         error("stpt:ZIlluminationMethod", ...
             "Unknown z-illumination method: %s", ...
