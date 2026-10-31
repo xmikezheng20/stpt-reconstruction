@@ -87,10 +87,9 @@ cfg.fusion.blending.alpha = 1.5;
 % Match deeper optical layers to the first layer after fusion by the ratio of
 % their local mean brightness over shared tissue: 10 um block means, a 50 um
 % Gaussian window (twice the 25 um layer spacing), and tissue read from the
-% green channel for every channel.
+% illumination tissue reference channel for every channel.
 cfg.zIllumination.method = "localTissueRatio";
 cfg.zIllumination.referenceLayer = 1;
-cfg.zIllumination.tissueChannel = 2;
 cfg.zIllumination.estimationGridUm = 10;
 cfg.zIllumination.windowSigmaUm = 50;
 

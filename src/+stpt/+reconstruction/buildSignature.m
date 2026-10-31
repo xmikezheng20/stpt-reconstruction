@@ -35,7 +35,6 @@ end
 signature.zIlluminationMethod = string(cfg.zIllumination.method);
 signature.zReferenceLayer = cfg.zIllumination.referenceLayer;
 if strcmpi(cfg.zIllumination.method, "localTissueRatio")
-    signature.zTissueChannel = cfg.zIllumination.tissueChannel;
     signature.zEstimationGridUm = cfg.zIllumination.estimationGridUm;
     signature.zWindowSigmaUm = cfg.zIllumination.windowSigmaUm;
 else

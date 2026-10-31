@@ -216,8 +216,8 @@ if isPilot || isProduction || isDownsampling
     end
     isLocalTissueRatio = strcmpi(cfg.zIllumination.method, "localTissueRatio");
     if isLocalTissueRatio
-        requiredZFields = ["referenceLayer", "tissueChannel", ...
-            "estimationGridUm", "windowSigmaUm"];
+        requiredZFields = ["referenceLayer", "estimationGridUm", ...
+            "windowSigmaUm"];
     else
         requiredZFields = ["referenceLayer", ...
             "maxEstimationPixels", "filterAreaFraction"];
@@ -235,10 +235,10 @@ if isPilot || isProduction || isDownsampling
             "The z-illumination reference layer is outside the acquisition.");
     end
     if isLocalTissueRatio
-        if ~isscalar(cfg.zIllumination.tissueChannel) || ...
-                ~ismember(cfg.zIllumination.tissueChannel, [cfg.channels.id])
-            error("stpt:ZIlluminationConfig", "cfg.zIllumination." + ...
-                "tissueChannel must be a configured channel id.");
+        % Tissue is read from stage 2's tissue reference channel and threshold.
+        if ~strcmpi(cfg.illumination.method, "tissueOtsu")
+            error("stpt:ZIlluminationConfig", "localTissueRatio " + ...
+                "requires cfg.illumination.method='tissueOtsu'.");
         end
         if ~isPositiveScalar(cfg.zIllumination.estimationGridUm) || ...
                 ~isPositiveScalar(cfg.zIllumination.windowSigmaUm)

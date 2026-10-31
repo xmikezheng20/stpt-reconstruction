@@ -24,8 +24,9 @@ fprintf("  section %03d: starting\n", sectionNumber);
 % Placement geometry is shared by every channel and layer in this section.
 geometry = stpt.fusion.computeGeometry(datasetIndex, sectionNumber);
 
-% localTissueRatio reads tissue from one channel and uses it for all, so that
-% channel is fused first and its tissue masks are kept for the others.
+% localTissueRatio reads tissue from stage 2's tissue reference channel and
+% uses it for all, so that channel is fused first and its tissue masks are
+% kept for the others.
 [channelOrder, tissueIndex] = channelProcessingOrder(datasetIndex, cfg);
 tissue = [];
 for c = channelOrder
@@ -46,6 +47,7 @@ for c = channelOrder
 
     if c == tissueIndex
         tissue = stpt.zillumination.tissueMasks(planes, supportMasks, ...
+            model.methodDetails.selectionThresholdLog, ...
             cfg.zIllumination, cfg.acquisition.pixelSizeUm);
     end
 
@@ -171,7 +173,7 @@ tissueIndex = [];
 if strcmpi(cfg.zIllumination.method, "localTissueRatio") && ...
         datasetIndex.geometry.layersPerSection > 1
     tissueIndex = find([datasetIndex.channels.id] == ...
-        cfg.zIllumination.tissueChannel);
+        cfg.illumination.tissueReferenceChannel);
     order = [tissueIndex, setdiff(order, tissueIndex, "stable")];
 end
 end

@@ -53,7 +53,6 @@ cfg.fusion.blending.alpha = 1.5;
 
 cfg.zIllumination.method = "localTissueRatio";
 cfg.zIllumination.referenceLayer = 1;
-cfg.zIllumination.tissueChannel = 2;
 cfg.zIllumination.estimationGridUm = 10;
 cfg.zIllumination.windowSigmaUm = 50;
 

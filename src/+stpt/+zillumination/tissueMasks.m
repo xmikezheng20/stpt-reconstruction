@@ -1,10 +1,14 @@
-function tissue = tissueMasks(planes, supportMasks, parameters, pixelSizeUm)
+function tissue = tissueMasks(planes, supportMasks, tileThresholdLog, ...
+        parameters, pixelSizeUm)
 %TISSUEMASKS Tissue on the estimation grid for each optical layer.
 %
 % Called with the fused layers of the tissue channel. Each layer is reduced to
-% block means of estimationGridUm, smoothed by one grid pixel, and split into
-% empty canvas and tissue by Otsu on log(1 + intensity). Pieces smaller than
-% one gain window (2*pi*sigma^2) are dropped, and only fully acquired blocks
+% block means of estimationGridUm and smoothed by one grid pixel. A block holds
+% tissue when its log(1 + intensity) exceeds half of tileThresholdLog, stage
+% 2's log-Otsu split of the same channel's tile means: midway in log between
+% the empty canvas (about 0) and that split. One threshold serves the whole
+% brain, so dim tissue in a deep layer still counts. Pieces smaller than one
+% gain window (2*pi*sigma^2) are dropped, and only fully acquired blocks
 % count. localTissueRatio uses these masks for every channel of the section.
 
 % pixelSizeUm is [x, y]; planes and grids are [rows, columns].
@@ -16,21 +20,12 @@ layers = cell(1, numel(planes));
 for layer = 1:numel(planes)
     reduced = stpt.zillumination.blockMean(planes{layer}, block);
     smoothed = imgaussfilt(reduced, 1, "Padding", "symmetric");
-    mask = bwareaopen(logOtsuMask(smoothed), minimumPiecePixels, 8);
+    mask = bwareaopen(log1p(smoothed) > tileThresholdLog / 2, ...
+        minimumPiecePixels, 8);
     layers{layer} = mask & stpt.zillumination.coveredBlocks( ...
         supportMasks{layer}, block, size(reduced));
 end
 
 tissue = struct("block", block, "gridUm", gridUm, ...
     "gridSize", size(reduced), "layers", {layers});
-end
-
-function mask = logOtsuMask(image)
-% Empty canvas against tissue: Otsu on log(1 + intensity) over all pixels.
-logIntensity = log1p(image);
-if max(logIntensity, [], "all") <= min(logIntensity, [], "all")
-    mask = false(size(image));
-    return
-end
-mask = logIntensity > multithresh(logIntensity, 1);
 end

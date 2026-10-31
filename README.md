@@ -230,11 +230,15 @@ the ratio of the two layers' local mean brightness over tissue they share.
   layers show the same structures from about this scale up, so a brightness
   difference there is optical.
 - `M` is the tissue present in both layers. It is read once per section from
-  `tissueChannel`, the autofluorescence channel, and used for every channel, so
-  a tracer signal never defines tissue. For each layer, the block means are
-  smoothed by one grid pixel and thresholded by Otsu on log intensity, which
-  separates the empty canvas from tissue. Pieces smaller than one window are
-  dropped.
+  the illumination stage's `tissueReferenceChannel`, the autofluorescence
+  channel, and used for every channel, so a tracer signal never defines
+  tissue. For each layer, the block means are smoothed by one grid pixel and
+  thresholded at one brain-wide presence level: half of stage 2's log-Otsu
+  split of tile means, midway in log between the empty canvas (about 0) and
+  that split, or about 3 counts. A fixed level keeps dim tissue in a deeper
+  layer, which a per-plane threshold would drop. Pieces smaller than one
+  window are dropped. The method therefore requires the `tissueOtsu`
+  illumination method.
 
 `T` is upsampled bilinearly by exactly the block factor, so each grid value
 sits at the centre of its block. Zeros stay zero, and tissue seen by only one
