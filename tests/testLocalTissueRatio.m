@@ -31,7 +31,7 @@ for k = 1:2
         planes{k}(position(1) + (-1:1), position(2) + (-1:1)) = 5000;
     end
 end
-tissue = stpt.zillumination.tissueMasks(toUint16(planes), {true, true}, ...
+tissue = stpt.zillumination.tissueMasks(toUint16(planes), ...
     tileThresholdLog, testConfig(50).zIllumination, pixelSizeUm);
 inside = blockCentresWithin(centre, 110, tissue.gridSize);
 outside = ~blockCentresWithin(centre, 150, tissue.gridSize);
@@ -39,21 +39,29 @@ for k = 1:2
     assert(all(tissue.layers{k}(inside)) && ~any(tissue.layers{k}(outside)));
 end
 
-% Missing tiles are neither tissue nor estimate; their pixels stay zero.
+% Missing tiles are neither tissue nor estimate, per channel: a tile missing
+% only from this channel keeps unit gain and zero pixels, and the tissue
+% around it is corrected as usual.
 support = true(400, 380);
 support(181:240, 171:230) = false;
-planes = toUint16({disc(centre, 120, 300) .* support, ...
+green = toUint16({disc(centre, 120, 300), disc(centre, 120, 150)});
+red = toUint16({disc(centre, 120, 300) .* support, ...
     disc(centre, 120, 150) .* support});
-tissue = stpt.zillumination.tissueMasks(planes, {support, support}, ...
+tissue = stpt.zillumination.tissueMasks(green, ...
     tileThresholdLog, cfg.zIllumination, pixelSizeUm);
-assert(~any(tissue.layers{1}(19:24, 18:23), "all"));
-[corrected, audit] = stpt.zillumination.apply( ...
-    planes, cfg, {support, support}, tissue);
+[corrected, audit, diagnostics] = stpt.zillumination.apply( ...
+    red, cfg, {support, support}, tissue);
+gain = diagnostics.gainFields{2};
+missing = false(tissue.gridSize);
+missing(19:24, 18:23) = true;
+inside = blockCentresWithin(centre, 110, tissue.gridSize);
+assert(all(gain(missing) == 1));
+assert(all(abs(gain(inside & ~missing) / 2 - 1) < 1e-5));
 assert(audit(2).applied && all(corrected{2}(~support) == 0));
 
 % A uniform two-fold attenuation is exact on shared tissue; zeros stay zero.
 planes = toUint16({disc(centre, 120, 1000), disc(centre, 120, 500)});
-tissue = stpt.zillumination.tissueMasks(planes, {true, true}, ...
+tissue = stpt.zillumination.tissueMasks(planes, ...
     tileThresholdLog, cfg.zIllumination, pixelSizeUm);
 [corrected, audit, diagnostics] = stpt.zillumination.apply( ...
     planes, cfg, {true, true}, tissue);
@@ -69,7 +77,7 @@ assert(isequal(corrected{1}, planes{1}) && audit(2).gainMedian == 2);
 reference = disc(centre, 150, 1000);
 attenuation = repmat([0.5 * ones(1, 200), 0.8 * ones(1, 180)], 400, 1);
 planes = toUint16({reference, round(reference .* attenuation)});
-tissue = stpt.zillumination.tissueMasks(planes, {true, true}, ...
+tissue = stpt.zillumination.tissueMasks(planes, ...
     tileThresholdLog, cfg.zIllumination, pixelSizeUm);
 [~, ~, diagnostics] = stpt.zillumination.apply( ...
     planes, cfg, {true, true}, tissue);
@@ -88,7 +96,7 @@ inDisc = disc(centre, 150, 1);
 tract = [zeros(400, 220), ones(400, 160)];
 planes = toUint16({inDisc .* (330 * (1 - tract) + 35 * tract), ...
     inDisc .* (165 * (1 - tract) + 7 * tract)});
-tissue = stpt.zillumination.tissueMasks(planes, {true, true}, ...
+tissue = stpt.zillumination.tissueMasks(planes, ...
     tileThresholdLog, cfg.zIllumination, pixelSizeUm);
 [~, ~, diagnostics] = stpt.zillumination.apply( ...
     planes, cfg, {true, true}, tissue);
@@ -104,7 +112,7 @@ assert(all(abs(gain(dim) / 5 - 1) < 1e-3));
 % A constant gain on the target cancels: the field scales and the output holds.
 planes = toUint16({disc(centre, 120, 1000), disc(centre, 120, 450)});
 tripled = {planes{1}, planes{2} * 3};
-tissue = stpt.zillumination.tissueMasks(planes, {true, true}, ...
+tissue = stpt.zillumination.tissueMasks(planes, ...
     tileThresholdLog, cfg.zIllumination, pixelSizeUm);
 [correctedA, ~, diagnosticsA] = stpt.zillumination.apply( ...
     planes, cfg, {true, true}, tissue);
@@ -121,7 +129,7 @@ onlyInReference = disc([200, 120], 110, 800) - sharedDisc;
 onlyInTarget = disc([80, 320], 40, 400);
 planes = toUint16({sharedDisc + onlyInReference, ...
     0.5 * sharedDisc + onlyInTarget});
-tissue = stpt.zillumination.tissueMasks(planes, {true, true}, ...
+tissue = stpt.zillumination.tissueMasks(planes, ...
     tileThresholdLog, cfg.zIllumination, pixelSizeUm);
 corrected = stpt.zillumination.apply(planes, cfg, {true, true}, tissue);
 assert(isequal(corrected{2}(onlyInTarget > 0), planes{2}(onlyInTarget > 0)));
@@ -132,23 +140,38 @@ assert(all(corrected{2}(onlyInReference > 0) == 0));
 green = toUint16({disc(centre, 120, 300), disc(centre, 120, 150)});
 redReference = disc(centre, 120, 50) + disc(centre, 15, 5000);
 red = toUint16({redReference, 0.5 * redReference});
-tissue = stpt.zillumination.tissueMasks(green, {true, true}, ...
+tissue = stpt.zillumination.tissueMasks(green, ...
     tileThresholdLog, cfg.zIllumination, pixelSizeUm);
 [~, ~, diagnostics] = stpt.zillumination.apply(red, cfg, {true, true}, tissue);
 dimDisc = blockCentresWithin(centre, 100, tissue.gridSize) & ...
     ~blockCentresWithin(centre, 40, tissue.gridSize);
 assert(all(abs(diagnostics.gainFields{2}(dimDisc) / 2 - 1) < 1e-5));
 
+% Where the reference layer has no signal within the window, the gain stays 1
+% and the plane is left as fused there; the rest of the layer is corrected.
+planes = toUint16({disc(centre, 120, 1000) .* ...
+    [ones(400, 200), zeros(400, 180)], disc(centre, 120, 500)});
+[corrected, audit, diagnostics] = stpt.zillumination.apply( ...
+    planes, cfg, {true, true}, tissue);
+gain = diagnostics.gainFields{2};
+shared = tissue.layers{1} & tissue.layers{2};
+columnCentres = 10 * (1:tissue.gridSize(2)) - 4.5;
+left = shared & columnCentres < 200 - 3 * 20 - 5;
+right = columnCentres > 200 + 3 * 20 + 5;
+assert(audit(2).applied && all(abs(gain(left) / 2 - 1) < 1e-5));
+assert(all(gain(:, right) == 1, "all"));
+assert(isequal(corrected{2}(:, 271:end), planes{2}(:, 271:end)));
+
 % Without tissue in the tissue channel every channel is left unchanged.
 empty = toUint16({zeros(400, 380), zeros(400, 380)});
-tissue = stpt.zillumination.tissueMasks(empty, {true, true}, ...
+tissue = stpt.zillumination.tissueMasks(empty, ...
     tileThresholdLog, cfg.zIllumination, pixelSizeUm);
 [corrected, audit] = stpt.zillumination.apply(red, cfg, {true, true}, tissue);
 assert(isequal(corrected, red) && audit(2).reason == "noCommonTissue");
 
 % Planes of any size keep their size; grid value i sits at native 10*i - 4.5.
 plane = toUint16({disc([100, 95], 60, 300, [205, 193])});
-tissue = stpt.zillumination.tissueMasks([plane, plane], {true, true}, ...
+tissue = stpt.zillumination.tissueMasks([plane, plane], ...
     tileThresholdLog, cfg.zIllumination, pixelSizeUm);
 corrected = stpt.zillumination.apply([plane, plane], cfg, {true, true}, tissue);
 assert(isequal(size(corrected{2}), [205, 193]));
@@ -160,7 +183,7 @@ assert(all(abs(ramp([5, 6, 15, 16]) - [1; 1.05; 1.95; 2.05]) < 1e-5));
 % same window in grid pixels.
 planes = toUint16({disc([100, 95], 70, 1000, [200, 190]), ...
     disc([100, 95], 70, 500, [200, 190])});
-tissue = stpt.zillumination.tissueMasks(planes, {true, true}, ...
+tissue = stpt.zillumination.tissueMasks(planes, ...
     tileThresholdLog, testConfig(50).zIllumination, [2, 2]);
 assert(isequal(tissue.block, [5, 5]) && isequal(tissue.gridUm, [10, 10]));
 [~, audit] = stpt.zillumination.apply(planes, testConfig(50), ...

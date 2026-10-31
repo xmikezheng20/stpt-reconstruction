@@ -6,13 +6,14 @@ function [corrected, audit, diagnostics] = ...
 %
 %     T = G * (M .* Rref) ./ G * (M .* Rk)  on M, and 1 elsewhere,
 %
-% where R are block means on the estimation grid, M is tissue present in both
-% layers (TISSUE comes from the tissue channel and is shared by all channels),
-% and G is a Gaussian of windowSigmaUm. T is the ratio of the two layers' local
-% mean brightness over shared tissue. It is upsampled bilinearly by exactly
-% the block factor, so each grid value sits at the centre of its own block,
-% and applied as a gain: zeros stay zero and tissue seen by only one layer is
-% left as fused.
+% where R are block means on the estimation grid, M is tissue present and
+% acquired in both layers (TISSUE comes from stage 2's tissue reference channel
+% and is shared by all channels), and G is a Gaussian of windowSigmaUm. T is
+% the ratio of the two layers' local mean brightness over shared tissue, and
+% stays 1 where either layer has no signal within the window. It is upsampled
+% bilinearly by exactly the block factor, so each grid value sits at the
+% centre of its own block, and applied as a gain: zeros stay zero and tissue
+% seen by only one layer is left as fused.
 
 nLayers = numel(planes);
 referenceLayer = parameters.referenceLayer;
@@ -62,19 +63,15 @@ for layer = 1:nLayers
     end
 
     % Gaussian-weighted sums over shared tissue; the mask weight cancels in
-    % their ratio, which is the ratio of the two local means.
+    % their ratio, which is the ratio of the two local means. Spatial
+    % filtering keeps a window without signal exactly zero.
     referenceSum = imgaussfilt(reference .* shared, sigma, ...
-        "FilterSize", filterSize, "Padding", 0);
+        "FilterSize", filterSize, "Padding", 0, "FilterDomain", "spatial");
     targetSum = imgaussfilt(target .* shared, sigma, ...
-        "FilterSize", filterSize, "Padding", 0);
+        "FilterSize", filterSize, "Padding", 0, "FilterDomain", "spatial");
     gain = ones(tissue.gridSize, "single");
-    valid = shared & targetSum > 0;
+    valid = shared & referenceSum > 0 & targetSum > 0;
     gain(valid) = referenceSum(valid) ./ targetSum(valid);
-    if any(~isfinite(gain(:))) || any(gain(:) <= 0)
-        [audit(layer), diagnostics] = recordIdentity(audit(layer), ...
-            diagnostics, layer, "invalidGainField", toc(started));
-        continue
-    end
 
     % Exact block-factor enlargement, then crop the zero padding of blockMean.
     fullGain = imresize(gain, tissue.gridSize .* tissue.block, "bilinear");

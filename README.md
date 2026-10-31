@@ -240,9 +240,10 @@ the ratio of the two layers' local mean brightness over tissue they share.
   window are dropped. The method therefore requires the `tissueOtsu`
   illumination method.
 
-`T` is upsampled bilinearly by exactly the block factor, so each grid value
-sits at the centre of its block. Zeros stay zero, and tissue seen by only one
-layer keeps its fused intensity. Each channel's gain comes from its own counts.
+`T` stays 1 where either layer has no signal within the window. It is
+upsampled bilinearly by exactly the block factor, so each grid value sits at
+the centre of its block. Zeros stay zero, and tissue seen by only one layer
+keeps its fused intensity. Each channel's gain comes from its own counts.
 The method assumes that empty canvas surrounds the section. It also assumes
 that both layers show the same structures at window scale; a sparse tracer
 channel should be checked for this before relying on it.
@@ -259,7 +260,7 @@ zero.
 
 Z validity is decided independently for every fused reference/target pair. An
 undefined ratio uses unit gain and leaves that target plane unchanged:
-`noCommonTissue` or `invalidGainField` for `localTissueRatio`, and
+`noCommonTissue` for `localTissueRatio`, and
 `nonpositiveSmoothedField` for `stitchitSmoothRatio`. This decision does not
 inherit the XY-model status. The reconstruction manifest records separate XY
 and Z applied flags and reasons, making both identity decisions explicit.
